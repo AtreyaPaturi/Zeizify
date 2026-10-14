@@ -14,6 +14,7 @@ tiles or time points are refused rather than silently merged into one projection
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from collections import defaultdict
@@ -48,6 +49,22 @@ class FieldStat:
     max: int
     saturated: bool
     path: Path
+    stain: str = ""  # antibody in this channel for this well (co-localization plate maps), "" if unknown
+
+
+def match_stain(channel: str, stains: dict[str, str]) -> str:
+    """Antibody assigned to a CZI channel in a well's plate-map stains ({fluor: antibody}).
+    Matches the fluorophore name exactly (case/punctuation-insensitive) first, then by its
+    wavelength number (e.g. plate map 'Alexa 488' <-> CZI channel 'AF488'), if unambiguous."""
+    if not stains:
+        return ""
+    key = slug(channel).lower()
+    for fl, ab in stains.items():
+        if slug(fl).lower() == key:
+            return ab
+    nums = set(re.findall(r"\d{3}", channel))
+    hits = [ab for fl, ab in stains.items() if nums & set(re.findall(r"\d{3}", fl))]
+    return hits[0] if len(hits) == 1 else ""
 
 
 def _entry_index(entry, dim: str) -> int:
@@ -126,7 +143,8 @@ def process_all(
 
     def stat(row, well, field, c, cname, lo, hi, path) -> FieldStat:
         return FieldStat(well, field, row.get("Antibody", ""), row.get("Treatment", ""), row.get("CellType", ""),
-                         row["Label"], c, cname, lo, hi, bool(bit_ceiling) and hi >= bit_ceiling, path)
+                         row["Label"], c, cname, lo, hi, bool(bit_ceiling) and hi >= bit_ceiling, path,
+                         match_stain(cname, row.get("Stains") or {}))
 
     for i, well in enumerate(wells, start=1):
         row = plate_map[well]

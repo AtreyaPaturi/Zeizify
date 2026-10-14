@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .layout import parse_panel
 from .plate import PLATE_FORMATS, normalize_well
 
 
@@ -48,6 +49,19 @@ def _parse_ranges(items: list[str]) -> dict[tuple[str, str], tuple[int, int]]:
     return out
 
 
+def _parse_colors(items: list[str]) -> dict[str, str]:
+    from .layout import COLORS
+
+    out = {}
+    for it in items:
+        ch, _, color = it.partition("=")
+        name = color.strip().capitalize()
+        if not ch or name not in COLORS:
+            raise SystemExit(f"--color expects CHANNEL=COLOR with COLOR in {', '.join(c.lower() for c in COLORS)}, got {it!r}")
+        out[ch.strip()] = name
+    return out
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="zeizify", description="Per-well extraction of Zeiss CZI multi-well plates.")
     p.add_argument("--version", action="version", version=f"zeizify {__version__}")
@@ -71,6 +85,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="reference field per antibody (default: first control-like treatment)")
     e.add_argument("--range", action="append", default=[], metavar="AB:CH=MIN:MAX",
                    help="hand-entered display range for one antibody/channel")
+    e.add_argument("--panel", action="append", default=[], metavar="CH[+CH...]",
+                   help="layout panel, e.g. AF488+AF594 for a co-localization merge (repeatable; replaces the defaults)")
+    e.add_argument("--color", action="append", default=[], metavar="CH=COLOR",
+                   help="pseudocolor for a channel: red, green, blue, magenta, cyan, yellow or gray")
     e.add_argument("--overwrite-png", action="store_true")
 
     sub.add_parser("info", help="print CZI metadata summary").add_argument("czi", type=Path)
@@ -122,9 +140,11 @@ def main(argv: "list[str] | None" = None) -> int:
     control = default_control_choice(result.stats)
     control.update(_parse_control(args.control))
     custom = _parse_ranges(args.range)
-    pipeline.finalize(result, args.out, control, custom, args.overwrite_png)
+    panels = [parse_panel(p) for p in args.panel] or None
+    colors = _parse_colors(args.color)
+    pipeline.finalize(result, args.out, control, custom, args.overwrite_png, panels=panels, colors=colors)
     pipeline.write_manifest(args.out, args.czi, args.plate_map, args.plate, mapping, args.flip_rows, args.flip_cols,
-                            result, control, custom)
+                            result, control, custom, panels, colors)
     return 0
 
 

@@ -1,11 +1,12 @@
 """
-Plate map editor: paint wells with three independent categories - A: cell type,
-B: treatment, C: antibody - and export the CSV the extraction step reads.
+Plate map editor: paint wells with cell type, treatment and - per fluorophore channel - the
+antibody stained in it, then export the CSV the extraction step reads.
 
-Pick a label on the right, then click or drag across wells to paint (clicking a well
-that already has that label clears it). Click a row letter, column number or the
-corner to toggle a whole row/column/plate. Each well shows its three categories as
-three wedges.
+Fluorophores are dynamic: add one per channel you stained (e.g. AF488 and AF594 for a
+two-antibody co-localization), and each gets its own antibody category. Pick a label on the
+right, then click or drag across wells to paint (clicking a well that already has that label
+clears it). Click a row letter, column number or the corner to toggle a whole row/column/plate.
+Each well is split into one wedge per category, clockwise from the top.
 """
 
 from __future__ import annotations
@@ -18,10 +19,8 @@ import customtkinter as ctk
 
 from ..plate import PLATE_FORMATS
 from . import theme as T
-from .state import CATEGORIES, CATEGORY_BADGES, CATEGORY_TITLES, PlateState
+from .state import FLUOR_SUGGESTIONS, PlateState
 from .widgets import Card, ghost_button, primary_button, section_title
-
-WEDGE_START = {"cellType": 90, "treatment": 210, "antibody": 330}
 
 
 class PlateCanvas(tk.Canvas):
@@ -57,6 +56,8 @@ class PlateCanvas(tk.Canvas):
         for c in range(1, p.n_cols + 1):
             self.create_text(hd + (c - 0.5) * cell, hd / 2, text=str(c), fill=T.pick(T.MUTED), font=small)
         self.wedges.clear()
+        cats = self.state.categories
+        ext = 360 / len(cats)
         pad = max(2, cell // 10)
         for ri, r in enumerate(p.row_letters):
             y0 = hd + ri * cell
@@ -64,11 +65,11 @@ class PlateCanvas(tk.Canvas):
             for c in range(1, p.n_cols + 1):
                 x0 = hd + (c - 1) * cell
                 box = (x0 + pad, y0 + pad, x0 + cell - pad, y0 + cell - pad)
-                well = f"{r}{c}"
-                self.wedges[well] = {
-                    cat: self.create_arc(*box, start=WEDGE_START[cat], extent=120, style="pieslice",
+                # clockwise from 12 o'clock (Tk measures angles counter-clockwise from 3 o'clock)
+                self.wedges[f"{r}{c}"] = {
+                    cat: self.create_arc(*box, start=90 - (i + 1) * ext, extent=ext, style="pieslice",
                                          outline=T.pick(T.SURFACE), width=1)
-                    for cat in CATEGORIES
+                    for i, cat in enumerate(cats)
                 }
                 self.create_oval(*box, outline=T.pick(T.WELL_LINE), width=1)
         self.paint_all()
@@ -141,19 +142,77 @@ class PlateCanvas(tk.Canvas):
         if not well:
             self.on_hover_cb(None)
             return
-        parts = [f"{CATEGORY_TITLES[c]}: {self.state.name_at(c, well) or '—'}" for c in CATEGORIES]
+        parts = [f"{self.state.short_title(c)}: {self.state.name_at(c, well) or '—'}" for c in self.state.categories]
         self.on_hover_cb(f"{well}   ·   " + "   ·   ".join(parts))
+
+
+class FluorophoreCard(Card):
+    """Declare the fluorophore channels stained in this plate; each becomes an antibody category."""
+
+    def __init__(self, master, page: "PlatePage"):
+        super().__init__(master)
+        self.page = page
+        section_title(self, "Fluorophores",
+                      "One per stained channel - add two or more for co-localization.\n"
+                      "Names should match the CZI channel names (e.g. AF488).").pack(fill="x", padx=16, pady=(14, 6))
+        self.chips = ctk.CTkFrame(self, fg_color="transparent")
+        self.chips.pack(fill="x", padx=12)
+        add = ctk.CTkFrame(self, fg_color="transparent")
+        add.pack(fill="x", padx=16, pady=(6, 4))
+        self.entry = ctk.CTkEntry(add, placeholder_text="Add fluorophore, e.g. AF647…", height=32, corner_radius=8,
+                                  border_color=T.BORDER, fg_color=T.SURFACE_ALT, font=T.font(12))
+        self.entry.pack(side="left", fill="x", expand=True)
+        self.entry.bind("<Return>", lambda e: self.add())
+        ghost_button(add, "Add", self.add, width=56).pack(side="left", padx=(6, 0))
+        self.suggest = ctk.CTkFrame(self, fg_color="transparent")
+        self.suggest.pack(fill="x", padx=14, pady=(2, 14))
+        self.refresh()
+
+    def add(self, name: "str | None" = None) -> None:
+        name = (name or self.entry.get()).strip()
+        if self.page.state.add_fluorophore(name):
+            self.entry.delete(0, "end")
+            self.page.categories_changed()
+        elif name:
+            self.page.app.toast(f"{name} is already in the list.", kind="warning")
+
+    def refresh(self) -> None:
+        for w in self.chips.winfo_children() + self.suggest.winfo_children():
+            w.destroy()
+        st = self.page.state
+        if not st.fluorophores:
+            ctk.CTkLabel(self.chips, text="No fluorophores yet - add the channels you stained.", font=T.font(11),
+                         text_color=T.WARNING, anchor="w").pack(fill="x", padx=4)
+        row = ctk.CTkFrame(self.chips, fg_color="transparent")
+        row.pack(fill="x")
+        for f in st.fluorophores:
+            chip = ctk.CTkFrame(row, fg_color=T.ACCENT_SOFT, corner_radius=14, height=28)
+            chip.pack(side="left", padx=3, pady=3)
+            name = ctk.CTkLabel(chip, text=f, font=T.font(12, "bold"), text_color=T.ACCENT)
+            name.pack(side="left", padx=(12, 4))
+            name.bind("<Double-Button-1>", lambda e, f=f: self.page.rename_fluorophore(f))
+            x = ctk.CTkLabel(chip, text="✕", width=20, font=T.font(11), text_color=T.ACCENT, cursor="hand2")
+            x.pack(side="left", padx=(0, 8))
+            x.bind("<Button-1>", lambda e, f=f: self.page.remove_fluorophore(f))
+        rest = [s for s in FLUOR_SUGGESTIONS if s.lower() not in (f.lower() for f in st.fluorophores)][:3]
+        if rest:
+            ctk.CTkLabel(self.suggest, text="Quick add:", font=T.font(11), text_color=T.MUTED).pack(side="left", padx=(2, 4))
+        for s in rest:
+            ctk.CTkButton(self.suggest, text=f"+ {s}", width=10, height=24, corner_radius=12, fg_color="transparent",
+                          hover_color=T.SURFACE_ALT, border_width=1, border_color=T.BORDER, text_color=T.MUTED,
+                          font=T.font(11), command=lambda s=s: self.add(s)).pack(side="left", padx=2)
 
 
 class CategoryPanel(Card):
     def __init__(self, master, page: "PlatePage", cat: str):
         super().__init__(master)
         self.page, self.cat = page, cat
+        st = page.state
         head = ctk.CTkFrame(self, fg_color="transparent")
         head.pack(fill="x", padx=16, pady=(14, 4))
-        ctk.CTkLabel(head, text=CATEGORY_BADGES[cat], width=24, height=24, corner_radius=6,
+        ctk.CTkLabel(head, text=st.badge(cat), width=24, height=24, corner_radius=6,
                      fg_color=T.ACCENT_SOFT, text_color=T.ACCENT, font=T.font(12, "bold")).pack(side="left")
-        ctk.CTkLabel(head, text=CATEGORY_TITLES[cat], font=T.font(14, "bold"), text_color=T.TEXT).pack(side="left", padx=8)
+        ctk.CTkLabel(head, text=st.title(cat), font=T.font(14, "bold"), text_color=T.TEXT).pack(side="left", padx=8)
         self.sub = ctk.CTkLabel(head, text="", font=T.font(11), text_color=T.MUTED)
         self.sub.pack(side="right")
 
@@ -162,8 +221,9 @@ class CategoryPanel(Card):
 
         add = ctk.CTkFrame(self, fg_color="transparent")
         add.pack(fill="x", padx=16, pady=(6, 14))
-        self.entry = ctk.CTkEntry(add, placeholder_text=f"New {CATEGORY_TITLES[cat].lower()} label…", height=32,
-                                  corner_radius=8, border_color=T.BORDER, fg_color=T.SURFACE_ALT, font=T.font(12))
+        hint = f"Antibody in {st.short_title(cat)}…" if cat.startswith("stain:") else f"New {st.title(cat).lower()} label…"
+        self.entry = ctk.CTkEntry(add, placeholder_text=hint, height=32, corner_radius=8, border_color=T.BORDER,
+                                  fg_color=T.SURFACE_ALT, font=T.font(12))
         self.entry.pack(side="left", fill="x", expand=True)
         self.entry.bind("<Return>", lambda e: self.add())
         ghost_button(add, "Add", self.add, width=56).pack(side="left", padx=(6, 0))
@@ -215,7 +275,7 @@ class CategoryPanel(Card):
 
 class PlatePage(ctk.CTkFrame):
     title = "Plate map"
-    subtitle = "Label each well with its cell type, treatment and antibody"
+    subtitle = "Label each well with its cell type, treatment and the antibody in each channel"
 
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
@@ -245,18 +305,45 @@ class PlatePage(ctk.CTkFrame):
             fill="x", padx=18, pady=(14, 6))
         self.canvas = PlateCanvas(left, self.state, self._changed, self._hover)
         self.canvas.pack(padx=14, pady=4)
-        self.hover = ctk.CTkLabel(left, text=" ", font=T.font(11), text_color=T.MUTED, anchor="w")
+        self.hover = ctk.CTkLabel(left, text=" ", font=T.font(11), text_color=T.MUTED, anchor="w", wraplength=600,
+                                  justify="left")
         self.hover.pack(fill="x", padx=18, pady=(2, 4))
-        self.counts = ctk.CTkLabel(left, text="", font=T.font(11), text_color=T.MUTED, anchor="w")
+        self.legend = ctk.CTkLabel(left, text="", font=T.font(11), text_color=T.MUTED, anchor="w", justify="left")
+        self.legend.pack(fill="x", padx=18, pady=(0, 2))
+        self.counts = ctk.CTkLabel(left, text="", font=T.font(11), text_color=T.MUTED, anchor="w", wraplength=600,
+                                   justify="left")
         self.counts.pack(fill="x", padx=18, pady=(0, 14))
 
-        right = ctk.CTkScrollableFrame(body, fg_color="transparent", width=360,
-                                       scrollbar_button_color=T.BORDER, scrollbar_button_hover_color=T.MUTED)
-        right.pack(side="left", fill="both", expand=True, padx=(16, 0))
+        self.right = ctk.CTkScrollableFrame(body, fg_color="transparent", width=360,
+                                            scrollbar_button_color=T.BORDER, scrollbar_button_hover_color=T.MUTED)
+        self.right.pack(side="left", fill="both", expand=True, padx=(16, 0))
+        self.fluor_card: "FluorophoreCard | None" = None
+        self.panels: dict[str, CategoryPanel] = {}
+        self._build_panels()
+        self._update_counts()
+
+    def _build_panels(self) -> None:
+        for w in self.right.winfo_children():
+            w.destroy()
         self.panels = {}
-        for cat in CATEGORIES:
-            self.panels[cat] = CategoryPanel(right, self, cat)
+        for cat in self.state.categories[:2]:
+            self.panels[cat] = CategoryPanel(self.right, self, cat)
             self.panels[cat].pack(fill="x", pady=(0, 12))
+        self.fluor_card = FluorophoreCard(self.right, self)
+        self.fluor_card.pack(fill="x", pady=(0, 12))
+        for cat in self.state.categories[2:]:
+            self.panels[cat] = CategoryPanel(self.right, self, cat)
+            self.panels[cat].pack(fill="x", pady=(0, 12))
+        order = "  →  ".join(self.state.short_title(c) for c in self.state.categories)
+        self.legend.configure(text=f"Wedges, clockwise from top:  {order}")
+
+    def categories_changed(self) -> None:
+        """Fluorophores were added/removed/renamed: rebuild category panels and the wedges."""
+        if self.canvas.brush and self.canvas.brush[0] not in self.state.categories:
+            self.canvas.brush = None
+        self.state.save()
+        self._build_panels()
+        self.canvas.redraw()
         self._update_counts()
 
     # actions
@@ -276,21 +363,37 @@ class PlatePage(ctk.CTkFrame):
 
     def _update_counts(self) -> None:
         n = self.state.plate.n_wells
-        parts = [f"{len(self.state.cats[c]['byWell'])}/{n} {CATEGORY_TITLES[c].lower()}" for c in CATEGORIES]
+        parts = [f"{len(self.state.cats[c]['byWell'])}/{n} {self.state.short_title(c)}" for c in self.state.categories]
         self.counts.configure(text="   ·   ".join(parts))
 
     def _set_plate(self, value: str) -> None:
         self.state.set_plate(PLATE_FORMATS[int(value)])
         self.state.save()
-        self.canvas.redraw()
         self.refresh_all()
 
     def refresh_all(self) -> None:
         self.plate_menu.set(str(self.state.plate.n_wells))
+        self._build_panels()
         self.canvas.redraw()
-        for p in self.panels.values():
-            p.refresh()
         self._update_counts()
+
+    def remove_fluorophore(self, fluor: str) -> None:
+        cat = f"stain:{fluor}"
+        if self.state.cats.get(cat, {}).get("byWell") and getattr(self, "_armed_fluor", None) != fluor:
+            self._armed_fluor = fluor
+            self.app.toast(f"{fluor} has painted wells - click ✕ again to remove it and its antibody labels.",
+                           kind="warning")
+            self.after(4000, lambda: setattr(self, "_armed_fluor", None))
+            return
+        self._armed_fluor = None
+        self.state.remove_fluorophore(fluor)
+        self.categories_changed()
+
+    def rename_fluorophore(self, fluor: str) -> None:
+        dlg = ctk.CTkInputDialog(text=f"Rename fluorophore “{fluor}” to:", title="Rename fluorophore")
+        v = (dlg.get_input() or "").strip()
+        if v and self.state.rename_fluorophore(fluor, v):
+            self.categories_changed()
 
     def delete_label(self, cat: str, label_id: str) -> None:
         for w in self.state.delete_label(cat, label_id):
@@ -346,6 +449,7 @@ class PlatePage(ctk.CTkFrame):
             except Exception as exc:  # noqa: BLE001
                 self.app.toast(f"Could not import: {exc}", kind="error")
                 return
+            self.canvas.brush = None
             self.state.save()
             self.refresh_all()
             self.app.set_plate_map(path)
@@ -353,5 +457,4 @@ class PlatePage(ctk.CTkFrame):
 
     def on_theme_change(self) -> None:
         self.canvas.redraw()
-        for p in self.panels.values():
-            p.refresh()
+        self._build_panels()

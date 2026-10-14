@@ -85,13 +85,15 @@ def test_contrast_report_and_layouts(czi, tmp_out):
     n = generate_png_layouts(stats, control, tmp_out, custom)
     assert n == 3
     img = Image.open(tmp_out / "CD7" / "png" / "PAR_IFN_CD7_A2_P1_layout.png")
-    assert img.size == (5 * 10 + 4 * 24, 8)
+    assert img.size == (7 * 10 + 6 * 24, 8)  # 7 default panels incl. AF488+AF594 merges
     assert generate_png_layouts(stats, control, tmp_out, custom) == 0  # kept on re-run
     assert generate_png_layouts(stats, control, tmp_out, custom, overwrite=True) == 3
 
 
 def test_panels_and_colors():
-    assert default_panels(CH) == [("AF488",), ("AF594",), ("DAPI",), ("AF488", "DAPI"), ("AF594", "DAPI")]
+    assert default_panels(CH) == [("AF488",), ("AF594",), ("DAPI",), ("AF488", "DAPI"), ("AF594", "DAPI"),
+                                  ("AF488", "AF594"), ("AF488", "AF594", "DAPI")]
+    assert default_panels(["AF488", "DAPI"]) == [("AF488",), ("DAPI",), ("AF488", "DAPI")]
     assert channel_color("DAPI") == (0, 0, 1) and channel_color("AF488") == (0, 1, 0)
     assert channel_color("AF594") == (1, 0, 0) and channel_color("Cy5") == (1, 0, 1)
     assert default_panels(["GFP"]) == [("GFP",)]

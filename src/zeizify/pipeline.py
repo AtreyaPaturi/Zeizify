@@ -23,7 +23,7 @@ from . import __version__
 from .contrast import ControlChoice, CustomRanges, write_intensity_report
 from .czi_metadata import read_bit_ceiling, read_channel_names, read_field_names, read_pixel_size_um
 from .extraction import FieldStat, Log, Progress, process_all
-from .layout import generate_png_layouts
+from .layout import Panel, default_color_name, default_panels, generate_png_layouts
 from .mapping import SceneWellMapping, build_mapping
 from .plate import DEFAULT_PLATE, PlateFormat, load_plate_map
 from .qc import write_qc_outputs
@@ -94,9 +94,11 @@ def extract(czi_path: Path, plate_map_path: Path, out_dir: Path, mapping: SceneW
 
 
 def finalize(result: RunResult, out_dir: Path, control: ControlChoice, custom: "CustomRanges | None" = None,
-             overwrite_png: bool = False, log: Log = print) -> tuple[Path, int]:
+             overwrite_png: bool = False, log: Log = print, panels: "list[Panel] | None" = None,
+             colors: "dict[str, str] | None" = None) -> tuple[Path, int]:
     report = write_intensity_report(result.stats, control, out_dir, custom)
-    n = generate_png_layouts(result.stats, control, out_dir, custom, overwrite=overwrite_png)
+    n = generate_png_layouts(result.stats, control, out_dir, custom, panels=panels, overwrite=overwrite_png,
+                             colors=colors)
     log(f"Wrote {report.name} and {n} layout PNG(s). Raw TIFFs were not modified.")
     return report, n
 
@@ -113,7 +115,8 @@ def _versions() -> dict[str, str]:
 
 def write_manifest(out_dir: Path, czi_path: Path, plate_map_path: Path, plate: PlateFormat, mapping: SceneWellMapping,
                    flip_rows: bool, flip_cols: bool, result: RunResult, control: "ControlChoice | None" = None,
-                   custom: "CustomRanges | None" = None) -> Path:
+                   custom: "CustomRanges | None" = None, panels: "list[Panel] | None" = None,
+                   colors: "dict[str, str] | None" = None) -> Path:
     czi_path = Path(czi_path)
     manifest = {
         "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -139,6 +142,11 @@ def write_manifest(out_dir: Path, czi_path: Path, plate_map_path: Path, plate: P
             "pixel_size_um": result.info.px_size_um,
         },
         "projection": "max intensity over Z, per channel, per field",
+        "stains": sorted({f"{s.antibody}: {s.channel_name}={s.stain}" for s in result.stats if s.stain}),
+        "layout": None if result.info is None else {
+            "panels": ["+".join(p) for p in (panels or default_panels(result.info.channel_names))],
+            "colors": {c: (colors or {}).get(c) or default_color_name(c) for c in result.info.channel_names},
+        },
         "contrast": {
             "control_fields": {ab: {"well": w, "field": f} for ab, (w, f) in (control or {}).items()},
             "custom_ranges": [{"antibody": ab, "channel": ch, "min": lo, "max": hi}

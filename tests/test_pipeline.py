@@ -59,7 +59,8 @@ def test_cli_extract_end_to_end(fake_czi, tmp_path):
                          "D5": {"CellType": "PAR", "Treatment": "DMSO", "Antibody": "HLA"}})
     out = tmp_path / "out"
     assert main(["extract", str(czi), "-p", str(pm), "-o", str(out), "--yes",
-                 "--range", "CD7:AF594=0:500"]) == 0
+                 "--range", "CD7:AF594=0:500", "--panel", "AF488", "--panel", "AF488+AF594+DAPI",
+                 "--color", "AF594=magenta"]) == 0
 
     rows = list(csv.DictReader(open(out / "_scene_mapping" / "scene_to_well.csv", encoding="utf-8")))
     assert {int(r["Scene"]): r["Well"] for r in rows} == truth
@@ -78,3 +79,5 @@ def test_cli_extract_end_to_end(fake_czi, tmp_path):
     assert manifest["mapping"]["n_wells"] == 96
     assert manifest["czi"]["pixel_size_um"] == pytest.approx(0.65)
     assert manifest["contrast"]["custom_ranges"] == [{"antibody": "CD7", "channel": "AF594", "min": 0, "max": 500}]
+    assert manifest["layout"]["panels"] == ["AF488", "AF488+AF594+DAPI"]
+    assert manifest["layout"]["colors"] == {"AF488": "Green", "AF594": "Magenta", "DAPI": "Blue"}

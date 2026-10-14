@@ -1,7 +1,9 @@
 """
-Contrast page - pick, per antibody, the reference field whose min/max becomes the display
-range for every other field of that antibody (e.g. the mock-treated well), and optionally
-type a custom range for any channel. Writes intensity_report.csv and the layout PNGs.
+Contrast page - pick, per antibody panel, the reference field whose min/max becomes the
+display range for every other field of that panel (e.g. the mock-treated well), optionally
+type a custom range for any channel, and choose the figure layout: which single-channel,
+nuclear-merge and co-localization panels to include and each channel's pseudocolor.
+Writes intensity_report.csv and the layout PNGs.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import customtkinter as ctk
 
 from .. import pipeline
 from ..contrast import default_control_choice, fields_by_antibody
+from ..layout import COLORS, candidate_panels, default_color_name, default_panels, nuclear_channel, stains_by_channel
 from ..plate import parse_well
 from . import theme as T
 from .widgets import Card, ghost_button, primary_button, section_title
@@ -25,7 +28,8 @@ def _well_key(w: str):
 
 
 class AntibodyCard(Card):
-    def __init__(self, master, antibody: str, fields: dict, channels: list[str], default: tuple[str, str], color: str):
+    def __init__(self, master, antibody: str, fields: dict, channels: list[str], default: tuple[str, str], color: str,
+                 stains: "dict[str, str] | None" = None):
         super().__init__(master)
         self.antibody, self.channels = antibody, channels
         head = ctk.CTkFrame(self, fg_color="transparent")
@@ -34,6 +38,10 @@ class AntibodyCard(Card):
         sw.create_oval(1, 1, 11, 11, fill=color, outline="")
         sw.pack(side="left", padx=(0, 8))
         ctk.CTkLabel(head, text=antibody or "(no antibody)", font=T.font(14, "bold"), text_color=T.TEXT).pack(side="left")
+        stains = stains or {}
+        if len(stains) > 1:
+            ctk.CTkLabel(head, text="co-localization", font=T.font(10, "bold"), text_color=T.ACCENT,
+                         fg_color=T.ACCENT_SOFT, corner_radius=8, height=20).pack(side="left", padx=8, ipadx=4)
         self.picked = ctk.CTkLabel(head, text="", font=T.font(11), text_color=T.MUTED)
         self.picked.pack(side="right")
 
@@ -46,7 +54,7 @@ class AntibodyCard(Card):
         self.tree.column("field", width=120, anchor="w")
         self.tree.column("treatment", width=130, anchor="w")
         for c in channels:
-            self.tree.heading(c, text=c.upper())
+            self.tree.heading(c, text=f"{c.upper()} · {stains[c]}" if stains.get(c) else c.upper())
             self.tree.column(c, width=120, anchor="center")
         self.iid_key = {}
         for i, e in enumerate(self.entries):
@@ -107,6 +115,104 @@ class AntibodyCard(Card):
         return out, problems
 
 
+class FigureLayoutCard(Card):
+    """Choose which panels go into each field's layout PNG, and every channel's pseudocolor."""
+
+    GROUPS = [("Single channels", lambda p, nuc: len(p) == 1),
+              ("With nuclear stain", lambda p, nuc: len(p) == 2 and nuc in p),
+              ("Co-localization", lambda p, nuc: len([c for c in p if c != nuc]) >= 2)]
+
+    def __init__(self, master, channels: list[str], on_change):
+        super().__init__(master)
+        self.channels, self.on_change = channels, on_change
+        self.nuc = nuclear_channel(channels)
+        section_title(self, "Figure layout",
+                      "Tick the panels to include in each field's layout PNG, left to right. Merges add the channels' "
+                      "colors, so co-localized signal appears as the mixed color (e.g. green + magenta = white).").pack(
+            fill="x", padx=18, pady=(14, 8))
+
+        colors_row = ctk.CTkFrame(self, fg_color="transparent")
+        colors_row.pack(fill="x", padx=18, pady=(0, 6))
+        ctk.CTkLabel(colors_row, text="Colors", font=T.font(11, "bold"), text_color=T.MUTED).pack(side="left", padx=(0, 10))
+        self.color_menus: dict[str, ctk.CTkOptionMenu] = {}
+        for c in channels:
+            box = ctk.CTkFrame(colors_row, fg_color=T.SURFACE_ALT, corner_radius=8)
+            box.pack(side="left", padx=(0, 8))
+            ctk.CTkLabel(box, text=c, font=T.font(11), text_color=T.TEXT).pack(side="left", padx=(10, 6))
+            m = ctk.CTkOptionMenu(box, values=list(COLORS), width=96, height=26, corner_radius=6, font=T.font(11),
+                                  fg_color=T.SURFACE, button_color=T.SURFACE, button_hover_color=T.BORDER,
+                                  text_color=T.TEXT, dropdown_font=T.font(11), command=lambda v: self._changed())
+            m.set(default_color_name(c))
+            m.pack(side="left", padx=(0, 4), pady=4)
+            self.color_menus[c] = m
+        presets = ctk.CTkFrame(self, fg_color="transparent")
+        presets.pack(fill="x", padx=18, pady=(0, 8))
+        ctk.CTkLabel(presets, text="Presets", font=T.font(11, "bold"), text_color=T.MUTED).pack(side="left", padx=(0, 10))
+        ghost_button(presets, "Green / Magenta (colorblind-safe)", lambda: self._preset(["Green", "Magenta", "Cyan", "Yellow"]),
+                     width=230, height=28).pack(side="left", padx=(0, 6))
+        ghost_button(presets, "Green / Red", lambda: self._preset(["Green", "Red", "Magenta", "Cyan"]),
+                     width=110, height=28).pack(side="left", padx=(0, 6))
+        ghost_button(presets, "Defaults", self._reset, width=90, height=28).pack(side="left")
+
+        defaults = set(default_panels(channels))
+        self.checks: dict[tuple, ctk.CTkCheckBox] = {}
+        cands = candidate_panels(channels)
+        for title, test in self.GROUPS:
+            group = [p for p in cands if test(p, self.nuc) and p not in self.checks]
+            if not group:
+                continue
+            ctk.CTkLabel(self, text=title.upper(), font=T.font(10, "bold"), text_color=T.ACCENT, anchor="w").pack(
+                fill="x", padx=18, pady=(8, 2))
+            row = ctk.CTkFrame(self, fg_color="transparent")
+            row.pack(fill="x", padx=14)
+            for i, p in enumerate(group):
+                cb = ctk.CTkCheckBox(row, text=" + ".join(p), font=T.font(12), text_color=T.TEXT, checkbox_width=18,
+                                     checkbox_height=18, corner_radius=5, fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER,
+                                     border_color=T.BORDER, command=self._changed)
+                cb.grid(row=i // 4, column=i % 4, sticky="w", padx=4, pady=3)
+                if p in defaults:
+                    cb.select()
+                self.checks[p] = cb
+        self.preview = ctk.CTkLabel(self, text="", font=T.font(11), text_color=T.MUTED, anchor="w", justify="left",
+                                    wraplength=900)
+        self.preview.pack(fill="x", padx=18, pady=(10, 14))
+        self._update_preview()
+
+    def _signal(self) -> list[str]:
+        return [c for c in self.channels if c != self.nuc]
+
+    def _preset(self, seq: list[str]) -> None:
+        for c, color in zip(self._signal(), seq):
+            self.color_menus[c].set(color)
+        if self.nuc:
+            self.color_menus[self.nuc].set("Blue")
+        self._changed()
+
+    def _reset(self) -> None:
+        for c, m in self.color_menus.items():
+            m.set(default_color_name(c))
+        defaults = set(default_panels(self.channels))
+        for p, cb in self.checks.items():
+            cb.select() if p in defaults else cb.deselect()
+        self._changed()
+
+    def _changed(self) -> None:
+        self._update_preview()
+        self.on_change()
+
+    def _update_preview(self) -> None:
+        panels = self.panels()
+        self.preview.configure(text=("Layout:  " + "  |  ".join("+".join(p) for p in panels)) if panels
+                               else "No panels selected - layout PNGs will be skipped.",
+                               text_color=T.MUTED if panels else T.WARNING)
+
+    def panels(self) -> list[tuple[str, ...]]:
+        return [p for p, cb in self.checks.items() if cb.get()]
+
+    def colors(self) -> dict[str, str]:
+        return {c: m.get() for c, m in self.color_menus.items()}
+
+
 class ContrastPage(ctk.CTkFrame):
     title = "Contrast"
     subtitle = "Pick a reference field per antibody so wells are visually comparable"
@@ -144,7 +250,7 @@ class ContrastPage(ctk.CTkFrame):
 
         overview = Card(self.body)
         overview.pack(fill="x", pady=(0, 12))
-        section_title(overview, "Plate overview", "Wells colored by antibody").pack(fill="x", padx=18, pady=(14, 6))
+        section_title(overview, "Plate overview", "Wells colored by antibody panel").pack(fill="x", padx=18, pady=(14, 6))
         self._plate_overview(overview, {s.well: s.antibody for s in stats}, colors)
         legend = ctk.CTkFrame(overview, fg_color="transparent")
         legend.pack(fill="x", padx=18, pady=(4, 14))
@@ -152,11 +258,15 @@ class ContrastPage(ctk.CTkFrame):
             ctk.CTkLabel(legend, text="●", text_color=colors[ab], font=T.font(14)).pack(side="left")
             ctk.CTkLabel(legend, text=ab or "(none)", font=T.font(12), text_color=T.TEXT).pack(side="left", padx=(2, 14))
 
+        stains = stains_by_channel(stats)
         self.cards = []
         for ab in antibodies:
-            card = AntibodyCard(self.body, ab, groups[ab], channels, defaults[ab], colors[ab])
+            card = AntibodyCard(self.body, ab, groups[ab], channels, defaults[ab], colors[ab], stains.get(ab))
             card.pack(fill="x", pady=(0, 12))
             self.cards.append(card)
+
+        self.layout_card = FigureLayoutCard(self.body, channels, on_change=lambda: self.overwrite.select())
+        self.layout_card.pack(fill="x", pady=(0, 12))
 
         bar = Card(self.body)
         bar.pack(fill="x", pady=(0, 8))
@@ -197,11 +307,13 @@ class ContrastPage(ctk.CTkFrame):
         self.status.configure(text="Writing report and layout PNGs…", text_color=T.MUTED)
         run = self.app.pages["run"]
         overwrite = bool(self.overwrite.get())
+        panels, colors = self.layout_card.panels(), self.layout_card.colors()
 
         def work():
-            res = pipeline.finalize(self.result, self.out, control, custom, overwrite_png=overwrite, log=lambda s: None)
+            res = pipeline.finalize(self.result, self.out, control, custom, overwrite_png=overwrite, log=lambda s: None,
+                                    panels=panels or [()], colors=colors)
             pipeline.write_manifest(self.out, Path(run.czi), Path(run.plate_map), run.plate, run.mapping,
-                                    run.flip_rows, run.flip_cols, self.result, control, custom)
+                                    run.flip_rows, run.flip_cols, self.result, control, custom, panels, colors)
             return res
 
         def done(res):

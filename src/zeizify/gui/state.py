@@ -3,6 +3,9 @@ Persistent GUI state, stored under ~/.zeizify/ (override with ZEIZIFY_HOME):
 
     plate_state.json  - the plate map being edited (labels + well assignments per category)
     settings.json     - appearance mode and recent runs
+
+Categories are dynamic: cell type, treatment, and one "stain" category per fluorophore the
+user declares (e.g. AF488, AF594), so a well can carry several antibodies for co-localization.
 """
 
 from __future__ import annotations
@@ -10,16 +13,41 @@ from __future__ import annotations
 import csv
 import json
 import os
+import string
 import uuid
 from datetime import datetime
 from pathlib import Path
 
-from ..plate import CATEGORY_COLUMNS, DEFAULT_PLATE, PLATE_FORMATS, PlateFormat, normalize_well, plate_map_csv_text
+from ..plate import (
+    DEFAULT_PLATE,
+    PLATE_FORMATS,
+    PlateFormat,
+    normalize_well,
+    plate_map_csv_text,
+    plate_map_fluorophores,
+    stain_column,
+)
 from .theme import CATEGORY_PALETTES
 
-CATEGORIES = ["cellType", "treatment", "antibody"]
-CATEGORY_TITLES = {"cellType": "Cell type", "treatment": "Treatment", "antibody": "Antibody"}
-CATEGORY_BADGES = {"cellType": "A", "treatment": "B", "antibody": "C"}
+FIXED = ["cellType", "treatment"]
+FIXED_TITLES = {"cellType": "Cell type", "treatment": "Treatment"}
+FIXED_COLUMNS = {"cellType": "CellType", "treatment": "Treatment"}
+STAIN = "stain:"
+DEFAULT_FLUOROPHORES = ["AF488", "AF594"]
+LEGACY_ANTIBODY_FLUOR = "AF594"  # v1.0 single-antibody maps: the antibody-of-interest channel
+FLUOR_SUGGESTIONS = ["AF405", "AF488", "AF546", "AF555", "AF568", "AF594", "AF647", "Cy3", "Cy5", "GFP", "mCherry"]
+
+
+def stain_key(fluor: str) -> str:
+    return f"{STAIN}{fluor}"
+
+
+def is_stain(cat: str) -> bool:
+    return cat.startswith(STAIN)
+
+
+def fluor_of(cat: str) -> str:
+    return cat[len(STAIN):]
 
 
 def home() -> Path:
@@ -45,26 +73,85 @@ def _write_json(path: Path, data: dict) -> None:
 
 
 class PlateState:
-    """state[cat] = {"labels": [{"id","name","color"}], "byWell": {well: label_id}}"""
+    """cats[key] = {"labels": [{"id","name","color"}], "byWell": {well: label_id}} for every key in
+    categories (cellType, treatment, stain:<fluor> ...)."""
 
     def __init__(self, path: "Path | None" = None):
         self.path = path or home() / "plate_state.json"
-        self.plate: PlateFormat = DEFAULT_PLATE
-        self.cats = {c: {"labels": [], "byWell": {}} for c in CATEGORIES}
         data = _read_json(self.path)
-        self.plate = PLATE_FORMATS.get(int(data.get("plateWells", 96)), DEFAULT_PLATE)
-        legacy = bool(data) and "plateWells" not in data  # written by the original plate_mapper.py
-        for c in CATEGORIES:
-            if c in data:
-                self.cats[c]["labels"] = list(data[c].get("labels", []))
-                self.cats[c]["byWell"] = dict(data[c].get("byWell", {}))
-            if legacy:  # the old generated hues were nearly indistinguishable - reassign distinct ones
-                pal = CATEGORY_PALETTES[c]
-                for i, lbl in enumerate(self.cats[c]["labels"]):
-                    lbl["color"] = pal[i % len(pal)]
+        self.plate: PlateFormat = PLATE_FORMATS.get(int(data.get("plateWells", 96)), DEFAULT_PLATE)
+        self.fluorophores: list[str] = []
+        self.cats: dict[str, dict] = {c: {"labels": [], "byWell": {}} for c in FIXED}
+
+        if data.get("version", 1) >= 2:
+            self.fluorophores = list(data.get("fluorophores", []))
+            for key, cat in data.get("categories", {}).items():
+                self.cats[key] = {"labels": list(cat.get("labels", [])), "byWell": dict(cat.get("byWell", {}))}
+            for f in self.fluorophores:
+                self.cats.setdefault(stain_key(f), {"labels": [], "byWell": {}})
+        elif data:  # v1 (Zeizify 1.0/1.1) or the original plate_mapper.py: one "antibody" category
+            original = "plateWells" not in data
+            for c in FIXED:
+                if c in data:
+                    self.cats[c] = {"labels": list(data[c].get("labels", [])), "byWell": dict(data[c].get("byWell", {}))}
+            self.fluorophores = [LEGACY_ANTIBODY_FLUOR]
+            ab = data.get("antibody", {})
+            self.cats[stain_key(LEGACY_ANTIBODY_FLUOR)] = {"labels": list(ab.get("labels", [])),
+                                                         "byWell": dict(ab.get("byWell", {}))}
+            if original:  # the original generated hues were nearly indistinguishable - reassign distinct ones
+                for c in self.categories:
+                    pal = self.palette(c)
+                    for i, lbl in enumerate(self.cats[c]["labels"]):
+                        lbl["color"] = pal[i % len(pal)]
+        else:
+            self.fluorophores = list(DEFAULT_FLUOROPHORES)
+            for f in self.fluorophores:
+                self.cats[stain_key(f)] = {"labels": [], "byWell": {}}
 
     def save(self) -> None:
-        _write_json(self.path, {"plateWells": self.plate.n_wells, **self.cats})
+        _write_json(self.path, {"version": 2, "plateWells": self.plate.n_wells, "fluorophores": self.fluorophores,
+                                "categories": {c: self.cats[c] for c in self.categories}})
+
+    # categories
+    @property
+    def categories(self) -> list[str]:
+        return FIXED + [stain_key(f) for f in self.fluorophores]
+
+    def title(self, cat: str) -> str:
+        return f"Antibody · {fluor_of(cat)}" if is_stain(cat) else FIXED_TITLES[cat]
+
+    def short_title(self, cat: str) -> str:
+        return fluor_of(cat) if is_stain(cat) else FIXED_TITLES[cat]
+
+    def badge(self, cat: str) -> str:
+        return string.ascii_uppercase[self.categories.index(cat) % 26]
+
+    def palette(self, cat: str) -> list[str]:
+        if not is_stain(cat):
+            return CATEGORY_PALETTES[cat]
+        pal = CATEGORY_PALETTES["antibody"]
+        k = (3 * self.fluorophores.index(fluor_of(cat))) % len(pal) if fluor_of(cat) in self.fluorophores else 0
+        return pal[k:] + pal[:k]  # each channel starts on a different hue
+
+    def add_fluorophore(self, name: str) -> bool:
+        name = name.strip()
+        if not name or name.lower() in (f.lower() for f in self.fluorophores):
+            return False
+        self.fluorophores.append(name)
+        self.cats.setdefault(stain_key(name), {"labels": [], "byWell": {}})
+        return True
+
+    def remove_fluorophore(self, name: str) -> None:
+        self.fluorophores = [f for f in self.fluorophores if f != name]
+        self.cats.pop(stain_key(name), None)
+
+    def rename_fluorophore(self, old: str, new: str) -> bool:
+        new = new.strip()
+        if not new or new == old or new.lower() in (f.lower() for f in self.fluorophores if f != old):
+            return False
+        self.fluorophores = [new if f == old else f for f in self.fluorophores]
+        self.cats[stain_key(new)] = self.cats.pop(stain_key(old), {"labels": [], "byWell": {}})
+        return True
 
     # labels
     def label(self, cat: str, label_id: "str | None") -> "dict | None":
@@ -86,7 +173,7 @@ class PlateState:
         if existing:
             return existing
         used = {l["color"] for l in self.cats[cat]["labels"]}
-        pal = CATEGORY_PALETTES[cat]
+        pal = self.palette(cat)
         color = next((c for c in pal if c not in used), pal[len(self.cats[cat]["labels"]) % len(pal)])
         lbl = {"id": str(uuid.uuid4()), "name": name, "color": color}
         self.cats[cat]["labels"].append(lbl)
@@ -106,40 +193,52 @@ class PlateState:
     def set_plate(self, plate: PlateFormat) -> None:
         self.plate = plate
         valid = set(plate.wells())
-        for c in CATEGORIES:
+        for c in self.categories:
             self.cats[c]["byWell"] = {w: v for w, v in self.cats[c]["byWell"].items() if w in valid}
 
     def clear_wells(self) -> None:
-        for c in CATEGORIES:
+        for c in self.categories:
             self.cats[c]["byWell"] = {}
 
     def n_labeled(self) -> int:
-        return len({w for c in CATEGORIES for w in self.cats[c]["byWell"]})
+        return len({w for c in self.categories for w in self.cats[c]["byWell"]})
 
     # CSV
+    def column(self, cat: str) -> str:
+        return stain_column(fluor_of(cat)) if is_stain(cat) else FIXED_COLUMNS[cat]
+
     def rows(self) -> dict[str, dict[str, str]]:
-        out = {}
-        for w in self.plate.wells():
-            out[w] = {col: self.name_at(cat, w) for cat, col in CATEGORY_COLUMNS.items()}
-        return out
+        return {w: {self.column(c): self.name_at(c, w) for c in self.categories} for w in self.plate.wells()}
 
     def csv_text(self) -> str:
-        return plate_map_csv_text(self.rows(), self.plate)
+        return plate_map_csv_text(self.rows(), self.plate, self.fluorophores)
 
     def import_csv(self, path: Path) -> int:
-        """Replace well assignments from a plate map CSV; labels are created as needed."""
+        """Replace the map from a plate map CSV. Fluorophores come from its Antibody_<fluor>
+        columns; a single-antibody CSV maps its Antibody column to one fluorophore."""
         with open(path, newline="", encoding="utf-8-sig") as f:
-            rows = list(csv.DictReader(f))
+            reader = csv.DictReader(f)
+            fields = reader.fieldnames or []
+            rows = list(reader)
         wells = [normalize_well(r["Well"]) for r in rows if r.get("Well")]
-        n = max((PLATE_FORMATS[k] for k in PLATE_FORMATS if set(wells) <= set(PLATE_FORMATS[k].wells())),
-                key=lambda p: -p.n_wells, default=self.plate)
-        self.plate = n
-        self.clear_wells()
+        fitting = [p for p in PLATE_FORMATS.values() if set(wells) <= set(p.wells())]
+        self.plate = min(fitting, key=lambda p: p.n_wells) if fitting else self.plate
+
+        fluors = plate_map_fluorophores(fields)
+        columns = {c: FIXED_COLUMNS[c] for c in FIXED}
+        if fluors:
+            self.fluorophores = fluors
+            columns.update({stain_key(f): stain_column(f) for f in fluors})
+        else:
+            if not self.fluorophores:
+                self.fluorophores = [LEGACY_ANTIBODY_FLUOR]
+            columns[stain_key(self.fluorophores[0])] = "Antibody"
+        self.cats = {c: {"labels": [], "byWell": {}} for c in self.categories}
         for r in rows:
             if not r.get("Well"):
                 continue
             w = normalize_well(r["Well"])
-            for cat, col in CATEGORY_COLUMNS.items():
+            for cat, col in columns.items():
                 v = (r.get(col) or "").strip()
                 if v:
                     self.cats[cat]["byWell"][w] = self.add_label(cat, v)["id"]

@@ -6,7 +6,10 @@ reproduce it. Version-specific parameters for any given run are recorded in that
 ## Input
 
 A Zeiss CZI file from a multi-well-plate acquisition in ZEN, in which every scene (`S` index) is one imaged field
-of one well, plus a plate map CSV assigning cell type, treatment and antibody to each well.
+of one well, plus a plate map CSV assigning each well a cell type, a treatment, and the antibody detected in
+each fluorophore channel (`Antibody_<fluorophore>` columns). A well may carry several antibodies in different
+channels (multiplexed or co-localization staining). Its *staining panel* is the ordered set of its
+per-channel antibodies (e.g. `CD7+HLA`).
 
 ## 1. Scene-to-well assignment
 
@@ -56,19 +59,26 @@ A field/channel is flagged as saturated when its maximum equals or exceeds 2<sup
 
 ## 3. Reference contrast
 
-For each antibody, one field is designated as the reference. By default this is the first field whose
-treatment contains a control keyword (mock, control, ctrl, DMSO, untreated, vehicle, PBS), otherwise the first
-field; the operator can choose a different one. The reference field's per-channel minimum and maximum define the
-display range for every field of that antibody. Optionally, a custom (min, max) can be entered per
-antibody and channel, which overrides the reference for that channel only. Ranges are recorded in
-`intensity_report.csv` and are not applied to the TIFFs.
+Each extracted channel is tagged with the antibody the plate map assigns to that channel in that well. CZI
+channel names are matched to plate-map fluorophore names, case- and punctuation-insensitively, falling back
+to a unique match on the three-digit wavelength. Fields are grouped by staining panel, so only identically
+stained wells share a reference. For each panel, one field is designated as the reference. By default this is
+the first field whose treatment contains a control keyword (mock, control, ctrl, DMSO, untreated, vehicle,
+PBS), otherwise the first field; the operator can choose a different one. The reference field's per-channel
+minimum and maximum define the display range for every field of that panel. Optionally, a custom (min, max)
+can be entered per panel and channel, which overrides the reference for that channel only. Ranges are
+recorded in `intensity_report.csv` and are not applied to the TIFFs.
 
 ## 4. Layout images
 
-For visualization only, each field's channels are linearly rescaled to 8 bit using the antibody's display
-range (values outside it are clipped), pseudocolored by fluorophore and combined additively. Panels are each
-non-nuclear channel alone, the nuclear stain alone, and each non-nuclear channel merged with the nuclear
-stain, separated by a 24-pixel white gap.
+For visualization only, each field's channels are linearly rescaled to 8 bit using the panel's display range
+(values outside it are clipped), pseudocolored and combined additively, so overlapping signal takes the
+mixed color (e.g. green + magenta → white). The operator selects the panels and each channel's color (red,
+green, blue, magenta, cyan, yellow or gray). Defaults are inferred from fluorophore names. The default panels
+are each signal channel alone, the nuclear stain alone, each signal channel merged with the nuclear stain,
+and, when two or more signal channels exist, all signal channels merged with and without the nuclear stain.
+Panels are placed side by side with a 24-pixel white gap and captioned with antibody names. The chosen panels
+and colors are recorded in `run_manifest.json`. Zeizify does not compute co-localization coefficients.
 
 ## Software
 

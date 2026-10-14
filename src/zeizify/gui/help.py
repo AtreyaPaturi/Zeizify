@@ -22,14 +22,30 @@ REPO_URL = "https://github.com/AtreyaPaturi/Zeizify"
 HELP: dict[str, dict] = {
     "plate": {
         "title": "Plate map",
-        "intro": "Describe what is in every well. The extraction step uses this map to name files, group them "
-                 "by antibody and skip empty wells.",
+        "intro": "Describe what is in every well: cell type, treatment, and which antibody is in each fluorophore "
+                 "channel. The extraction step uses this map to name files, group wells by staining panel and "
+                 "skip empty wells.",
         "sections": [
             ("Quick start", [
                 "Pick the plate format (24, 48, 96 or 384 wells) at the top.",
-                "Type a label under Cell type, Treatment or Antibody and press Enter (or Add).",
+                "Under Fluorophores, list the channels you stained (e.g. AF488, AF594). Each one gets its own "
+                "Antibody card.",
+                "Type a label in any card and press Enter (or Add).",
                 "The new label is selected automatically - click or drag across wells to paint it.",
-                "Repeat for the other two categories. Each well shows all three as wedges.",
+                "Repeat for every category. Each well shows one wedge per category, clockwise from the top "
+                "(the order is written under the plate).",
+            ]),
+            ("Fluorophores and co-localization", [
+                "Add one fluorophore per stained channel; use Quick add for common dyes or type your own.",
+                "For co-localization, paint a different antibody in each channel of the same wells - e.g. CD7 in "
+                "AF488 and HLA in AF594. The well's panel becomes CD7+HLA.",
+                "A well can use any subset of channels; leave a channel empty where nothing was stained.",
+                "Wells are grouped by panel for output folders and contrast, so only identically stained wells "
+                "are compared.",
+                "Fluorophore names should match the CZI channel names (AF488, AF594…) so each image is labeled "
+                "with its antibody. Matching by wavelength (e.g. 'Alexa 488') also works.",
+                "Double-click a fluorophore to rename it; click ✕ to remove it (twice if wells are painted).",
+                "Nuclear stains such as DAPI need no fluorophore entry.",
             ]),
             ("Painting", [
                 "Click a well to paint it; click it again with the same label to clear it.",
@@ -43,7 +59,7 @@ HELP: dict[str, dict] = {
                 "Double-click a label's name to rename it - every painted well updates.",
                 "Click ✕ to delete a label; its wells become empty for that category.",
                 "The number next to a label is how many wells carry it.",
-                "Hover over a well to see all three values at the bottom of the plate.",
+                "Hover over a well to see all of its values at the bottom of the plate.",
             ]),
             ("Saving and sharing", [
                 "Your map autosaves - closing the app never loses work.",
@@ -101,11 +117,13 @@ HELP: dict[str, dict] = {
     },
     "contrast": {
         "title": "Contrast",
-        "intro": "Choose one reference field per antibody. Its brightness range is applied to every other field "
-                 "of that antibody, so treated wells can be compared fairly with the control.",
+        "intro": "Choose one reference field per antibody panel. Its brightness range is applied to every other "
+                 "field of that panel, so treated wells can be compared fairly with the control. Then choose how "
+                 "the figure layouts look.",
         "sections": [
             ("Quick start", [
-                "Each antibody has its own table: one row per well and field, with each channel's min – max.",
+                "Each antibody panel (e.g. CD7, or CD7+HLA for co-localization) has its own table: one row per well "
+                "and field, with each channel's min – max. Column headings show which antibody is in each channel.",
                 "Click the row to use as the reference (usually a control well). A control-like treatment is "
                 "pre-selected for you.",
                 "Press Apply & export.",
@@ -115,16 +133,28 @@ HELP: dict[str, dict] = {
                 "Leave both boxes empty to follow the reference field (its values are shown faintly).",
                 "A custom range overrides the reference for that channel only. Min must be smaller than max.",
             ]),
+            ("Figure layout and co-localization", [
+                "Tick the panels each layout PNG should contain, left to right: single channels, channels merged "
+                "with the nuclear stain, and co-localization merges (e.g. AF488 + AF594, with or without DAPI).",
+                "Every combination of your channels is offered; the line under the checkboxes previews the order.",
+                "Pick a color per channel. In merges, colors add up: overlapping green and magenta signal appears "
+                "white, green and red appears yellow.",
+                "Green / Magenta is the colorblind-safe choice for co-localization figures; Defaults restores "
+                "the name-based colors and panels.",
+                "Changing the layout turns on 'Regenerate existing PNGs' so the new figures replace the old.",
+            ]),
             ("What gets written", [
-                "intensity_report.csv - every field's own min/max, saturation flag and the range chosen here.",
-                "<antibody>/png/…_layout.png - each channel and its DAPI merge side by side, using these ranges.",
+                "intensity_report.csv - every field's own min/max, the antibody in each channel, the saturation "
+                "flag and the range chosen here.",
+                "<panel>/png/…_layout.png - the chosen panels side by side, labeled with antibody names.",
                 "The raw TIFFs are never changed. Apply the ranges in Fiji or your analysis from the report.",
             ]),
             ("Tips", [
                 "Existing layout PNGs are kept on re-export. Turn on 'Regenerate existing PNGs' after changing "
                 "the contrast.",
-                "The plate overview at the top shows which wells belong to which antibody.",
-                "Your choices are recorded in run_manifest.json for your methods section.",
+                "The plate overview at the top shows which wells belong to which panel.",
+                "Your choices, including panels and colors, are recorded in run_manifest.json for your methods "
+                "section.",
             ]),
         ],
     },

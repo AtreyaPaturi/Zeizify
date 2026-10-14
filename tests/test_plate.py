@@ -33,7 +33,8 @@ def test_round_trip(tmp_path):
 def test_hand_edited_label_cannot_escape_output_dir(tmp_path):
     p = tmp_path / "map.csv"
     p.write_text("Well,Label,Antibody\nA01,../../x,CD7\n", encoding="utf-8")
-    assert load_plate_map(p) == {"A1": {"Well": "A1", "Label": "x", "Antibody": "CD7", "Treatment": "", "CellType": ""}}
+    assert load_plate_map(p) == {"A1": {"Well": "A1", "Label": "x", "Antibody": "CD7", "Treatment": "", "CellType": "",
+                                        "Stains": {}}}
 
 
 def test_duplicate_wells_rejected(tmp_path):

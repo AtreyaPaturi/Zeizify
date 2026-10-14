@@ -1,8 +1,10 @@
 """
 Reference contrast ranges per antibody and the sidecar intensity report.
 
-For each antibody, one field (typically a mock/vehicle-treated well) is chosen as the
-reference; its per-channel min/max becomes the display range for every other field of
+Fields are grouped by antibody panel - the well's Antibody value, which for co-localization
+plate maps is the per-channel stains joined by '+' (e.g. CD7+HLA), so only wells stained
+identically are compared. For each panel, one field (typically a mock/vehicle-treated well)
+is chosen as the reference; its per-channel min/max becomes the display range for every other field of
 that antibody, so treated wells are visually comparable to the control instead of each
 auto-scaling to its own signal. Any channel may additionally be given a hand-entered
 range per antibody that overrides the reference field for that channel only.
@@ -63,7 +65,7 @@ def build_control_range(stats: list[FieldStat], control: ControlChoice, custom: 
 
 
 REPORT_COLUMNS = [
-    "Well", "Field", "CellType", "Treatment", "Antibody", "Label", "Channel",
+    "Well", "Field", "CellType", "Treatment", "Antibody", "Label", "Channel", "Stain",
     "OwnMin", "OwnMax", "Saturated", "ControlWell", "ControlField", "ControlMin", "ControlMax", "Path",
 ]
 
@@ -81,6 +83,6 @@ def write_intensity_report(stats: list[FieldStat], control: ControlChoice, out_d
             else:
                 cwell, cfield = control.get(s.antibody, ("", ""))
             cmin, cmax = rng.get((s.antibody, s.channel_name), ("", ""))
-            w.writerow([s.well, s.field, s.cell_type, s.treatment, s.antibody, s.label, s.channel_name,
+            w.writerow([s.well, s.field, s.cell_type, s.treatment, s.antibody, s.label, s.channel_name, s.stain,
                         s.min, s.max, s.saturated, cwell, cfield, cmin, cmax, str(s.path)])
     return path

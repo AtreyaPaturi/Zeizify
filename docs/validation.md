@@ -39,7 +39,7 @@ The original scripts were reviewed against the references above. The following w
 
 ## Automated tests
 
-`pytest` runs 36 tests on synthetic data:
+`pytest` runs 46 tests on synthetic data:
 
 - metadata parsing, including a decoy channel order and reversed attribute order;
 - geometric mapping on a simulated 96-well plate with stage tilt (0.4 %) and positional jitter (σ = 40 px),
@@ -48,6 +48,8 @@ The original scripts were reviewed against the references above. The following w
 - metadata precedence, fallback when a single `ArrayName` is missing, and an out-of-plate well ID error;
 - Z projection values, mosaic refusal, ImageJ pixel-size metadata, saturation flags and resume without rewriting;
 - control selection, custom ranges, intensity report contents and layout PNG geometry;
+- multi-stain (co-localization) plate maps: per-channel antibody columns, panel grouping, stain-to-channel
+  matching, co-localization merge panels, user colors and migration of older saved maps;
 - an end-to-end `zeizify extract` run in both mapping modes (metadata and geometry) that verifies every
   scene's assigned well against ground truth.
 
