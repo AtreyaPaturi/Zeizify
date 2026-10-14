@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+title: "Zeizify: per-well extraction of Zeiss CZI multi-well plate acquisitions"
+type: software
+authors:
+  - given-names: Atreya
+    family-names: Paturi
+version: 1.0.0
+date-released: 2026-10-14
+license: MIT
+repository-code: "https://github.com/AtreyaPaturi/Zeizify"
+keywords:
+  - microscopy
+  - CZI
+  - Zeiss
+  - high-content screening
+  - well plate
+  - immunofluorescence

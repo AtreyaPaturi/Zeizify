@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zeizify"
+dynamic = ["version"]
+description = "Per-well extraction of Zeiss CZI multi-well plate acquisitions: scene-to-well mapping, per-channel Z max projections, and control-referenced contrast."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "Atreya Paturi" }]
+keywords = ["microscopy", "czi", "zeiss", "high-content screening", "well plate", "immunofluorescence", "image analysis"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+    "pillow>=10.1",
+    "tifffile>=2024.1.30",
+    "czifile>=2026.6.12",
+    "imagecodecs>=2024.1.1",
+    "customtkinter>=5.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+zeizify = "zeizify.cli:main"
+
+[project.gui-scripts]
+zeizify-gui = "zeizify.gui.app:main"
+
+[project.urls]
+Homepage = "https://github.com/AtreyaPaturi/Zeizify"
+Issues = "https://github.com/AtreyaPaturi/Zeizify/issues"
+
+[tool.setuptools.dynamic]
+version = { attr = "zeizify.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

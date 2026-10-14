@@ -1,0 +1,21 @@
+# environments
+Zeizify_env/
+.venv/
+venv/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# local-only
+_original_scripts/
+*.czi
+plate_mapper_state.json
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
