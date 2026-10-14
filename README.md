@@ -80,6 +80,11 @@ zeizify            # or: zeizify-gui, or: python -m zeizify
 
 Recent runs appear in the sidebar. Click one to reload its inputs.
 
+**Help and version.** Every page has a **Help** button (or press **F1**) that opens a side panel explaining
+how to use that page. The version you are running is shown in the window title and next to the logo. Click
+it (or *About* in the sidebar) to see the exact Zeizify, Python and library versions, and use
+*Copy version info* when reporting a problem or writing your methods.
+
 ## Command line
 
 ```bash
@@ -162,7 +167,7 @@ src/zeizify/
 ├── pipeline.py       high-level steps + run manifest (shared by GUI and CLI)
 ├── plate.py          plate formats and plate map CSV
 ├── cli.py            command-line interface
-└── gui/              desktop app (customtkinter)
+└── gui/              desktop app (customtkinter); help text lives in gui/help.py
 tests/                pytest suite with synthetic CZI fixtures
 docs/                 methods, validation, screenshots
 examples/             example plate map
@@ -178,6 +183,16 @@ pytest
 The tests use synthetic metadata and in-memory subblocks, so no CZI files are needed. They cover metadata
 parsing, metadata- and geometry-based mapping (including tilt, jitter, flips, uneven field counts and 384-well
 plates), projection, resume, saturation, contrast, layouts and an end-to-end CLI run.
+
+## Versioning and releases
+
+Zeizify follows [Semantic Versioning](https://semver.org/). The version is defined once, in
+`zeizify.__version__` (`src/zeizify/__init__.py`), and appears in the GUI, `zeizify --version` and every `run_manifest.json`.
+Changes are listed in [CHANGELOG.md](CHANGELOG.md). To release a new version:
+
+1. Bump `__version__` in `src/zeizify/__init__.py` and `version:` in `CITATION.cff`.
+2. Add a `## [x.y.z]` section to `CHANGELOG.md`.
+3. Run `pytest` (it fails if these three disagree), commit, then tag: `git tag vx.y.z && git push --tags`.
 
 ## Citation
 

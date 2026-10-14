@@ -39,7 +39,7 @@ The original scripts were reviewed against the references above. The following w
 
 ## Automated tests
 
-`pytest` runs 33 tests on synthetic data:
+`pytest` runs 36 tests on synthetic data:
 
 - metadata parsing, including a decoy channel order and reversed attribute order;
 - geometric mapping on a simulated 96-well plate with stage tilt (0.4 %) and positional jitter (σ = 40 px),
