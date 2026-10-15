@@ -73,6 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--plate", type=lambda s: _plate(int(s)), default=PLATE_FORMATS[96], help="wells per plate (default 96)")
     common.add_argument("--flip-rows", action="store_true", help="geometry fallback only: A1 is at the bottom")
     common.add_argument("--flip-cols", action="store_true", help="geometry fallback only: A1 is at the right")
+    common.add_argument("--first-well", default="A1", metavar="WELL",
+                        help="geometry fallback only: the imaged well closest to A1, e.g. A2 if imaging started in "
+                             "column 2 (default A1)")
 
     m = sub.add_parser("map", parents=[common], help="scene -> well mapping + QC outputs")
     m.add_argument("-o", "--out", type=Path, required=True)
@@ -121,7 +124,8 @@ def main(argv: "list[str] | None" = None) -> int:
         return 0
 
     args.out.mkdir(parents=True, exist_ok=True)
-    mapping, png = pipeline.map_scenes(args.czi, args.out, args.plate, args.flip_rows, args.flip_cols)
+    mapping, png = pipeline.map_scenes(args.czi, args.out, args.plate, args.flip_rows, args.flip_cols,
+                                       first_well=args.first_well)
     print(f"QC plot: {png}")
     if args.cmd == "map":
         return 0

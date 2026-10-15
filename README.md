@@ -20,9 +20,10 @@ control-referenced contrast ranges, configurable figure-style layout PNGs and a 
 ## Features
 
 - **Scene → well mapping you can trust.** Well IDs are read directly from the CZI's own metadata
-  (`Scene/ArrayName`, written by ZEN) and cross-checked against `Shape/RowIndex|ColumnIndex`. Older or
-  third-party files without well IDs fall back to clustering stage positions, and the result must be
-  confirmed by a human on a QC plot (with flip-rows / flip-columns controls) before any well is processed.
+  (`Scene/ArrayName`, or the scene's `Shape` name, both written by ZEN) and cross-checked against
+  `Shape/RowIndex|ColumnIndex`. Files without well IDs fall back to stage positions, which works for full and
+  partially imaged plates (e.g. only columns 2–5). That result must be confirmed by a human on a QC plot (first
+  imaged well, flip rows / columns) before any well is processed.
 - **Memory-safe extraction.** Only one scene's subblocks are read at a time. Multi-hundred-GB files are never
   loaded whole. Reads are retried on transient (network-drive) errors.
 - **Per-channel Z max projection**, written once per channel as a TIFF with the physical pixel size embedded
@@ -78,9 +79,9 @@ zeizify            # or: zeizify-gui, or: python -m zeizify
 2. **Run.** In the composer at the bottom, choose the `.czi` file, a plate map CSV (or leave it empty to use the
    editor's current map) and an output folder, then press **Run**.
 3. **Confirm the mapping.** A QC plot of every field's stage position, labeled by well, appears in the timeline.
-   If the well IDs came from metadata, check it and continue. If they were inferred from geometry, use
-   *Flip rows* / *Flip columns* until A1 is where it physically was, then continue. Nothing is extracted until
-   you confirm.
+   If the well IDs came from metadata, check it and continue. If they were inferred from geometry, check the
+   *First imaged well* (e.g. A2 if you started in column 2) and use *Flip rows* / *Flip columns* until the
+   labels match the plate, then continue. Nothing is extracted until you confirm.
 4. **Extraction** runs in the background with a progress bar and live log. *Stop* finishes the current field
    and stops. Running again resumes.
 5. **Contrast.** For each antibody panel, select the reference field (a control-like treatment such as
@@ -116,6 +117,7 @@ zeizify extract plate.czi -p plate_map.csv -o out/ --yes \
 |---|---|
 | `--plate {6,12,24,48,96,384}` | plate format (default 96) |
 | `--flip-rows`, `--flip-cols` | orientation for the geometry fallback (A1 at bottom / right) |
+| `--first-well WELL` | geometry fallback: the imaged well closest to A1, e.g. `A2` (default `A1`) |
 | `--yes` | accept the mapping without the interactive prompt (inspect `_scene_mapping/scene_to_well_qc.png`!) |
 | `--control AB=WELL:FIELD` | reference field per antibody (default: first control-like treatment) |
 | `--range AB:CHANNEL=MIN:MAX` | custom display range for one antibody/channel |

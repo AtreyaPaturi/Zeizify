@@ -5,7 +5,8 @@ All functions take the metadata XML *string* (``CziFile(...).metadata()``), so t
 testable without a CZI on disk. Element paths follow the ZEN ImageDocument schema and
 match those used by ZEISS' own czitools (sebi06/czitools):
 
-    Scenes   Metadata/Information/Image/Dimensions/S/Scenes/Scene   (@Index, @Name, ArrayName, Shape/RowIndex|ColumnIndex)
+    Scenes   Metadata/Information/Image/Dimensions/S/Scenes/Scene   (@Index, @Name, ArrayName,
+             Shape/@Name, Shape/RowIndex|ColumnIndex)
     Channels Metadata/Information/Image/Dimensions/Channels/Channel (@Id, @Name), in C-index order
     Scaling  Metadata/Scaling/Items/Distance[@Id='X']/Value         (meters per pixel)
     Bits     Metadata/Information/Image/ComponentBitCount           (falls back to per-channel values)
@@ -27,6 +28,12 @@ class SceneInfo:
     array_name: str  # well ID assigned by ZEN, e.g. "A1" ("" if absent)
     row_index: "int | None"  # Shape/RowIndex, if present
     col_index: "int | None"  # Shape/ColumnIndex, if present
+    shape_name: str = ""  # Shape/@Name - the well ID in files without ArrayName (e.g. "A2"), "" if absent
+
+    @property
+    def well_name(self) -> str:
+        """Well ID recorded by ZEN: ArrayName if present, else the scene's Shape name (as czitools does)."""
+        return self.array_name or self.shape_name
 
 
 def _metadata_root(xml: str) -> ET.Element:
@@ -62,6 +69,7 @@ def read_scenes(xml: str) -> list[SceneInfo]:
                 array_name=(sc.findtext("ArrayName") or "").strip(),
                 row_index=_int_or_none(shape.findtext("RowIndex")) if shape is not None else None,
                 col_index=_int_or_none(shape.findtext("ColumnIndex")) if shape is not None else None,
+                shape_name=(shape.get("Name") or "").strip() if shape is not None else "",
             )
         )
     return out

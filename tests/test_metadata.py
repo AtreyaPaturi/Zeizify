@@ -42,6 +42,7 @@ def test_scenes_parse_regardless_of_attribute_order():
     scenes = read_scenes(XML)
     assert [(s.index, s.name, s.array_name) for s in scenes] == [(0, "P1", "A1"), (1, "P2", "A01"), (2, "P1", "B12")]
     assert scenes[2].row_index == 1 and scenes[2].col_index == 11
+    assert scenes[2].shape_name == "B12" and scenes[0].well_name == "A1"
     assert read_field_names(XML) == {0: "P1", 1: "P2", 2: "P1"}
 
 

@@ -13,29 +13,33 @@ per-channel antibodies (e.g. `CD7+HLA`).
 
 ## 1. Scene-to-well assignment
 
-**Metadata (primary).** For plate acquisitions, ZEN writes a `<Scene Index=… Name=…>` element per scene under
-`Metadata/Information/Image/Dimensions/S/Scenes`, containing `<ArrayName>` (the well ID, e.g. `B7`) and
-`<Shape><RowIndex/><ColumnIndex/></Shape>`. When every scene carries an `ArrayName`, it is used as the
-assignment. Scenes are keyed by their `Index` attribute, which is the value referenced by the image subblocks,
+**Metadata (primary).** ZEN writes a `<Scene Index=… Name=…>` element per scene under
+`Metadata/Information/Image/Dimensions/S/Scenes`, which records the scene's well as `<ArrayName>` (plate-carrier
+acquisitions) or as the name of its `<Shape Name="B7">`, together with `<Shape><RowIndex/><ColumnIndex/></Shape>`.
+When every scene carries a well ID (`ArrayName`, else a Shape name of the form letter + number), it is used
+as the assignment. Scenes are keyed by their `Index` attribute, which is the value referenced by the image subblocks,
 not by their order in the XML. As an independent consistency check, `ArrayName` is compared against
 `RowIndex`/`ColumnIndex` under 0- and 1-based conventions, and any disagreement is reported.
 
-**Geometry (fallback).** If any scene lacks an `ArrayName`, assignments are inferred from each scene's
-stage position, taken as the (Y, X) start coordinate of its first subblock in the subblock directory (no
-pixel data is decoded).
-1. The scene positions are agglomeratively clustered (average linkage, Euclidean) into *n*<sub>wells</sub>
-   clusters. Fields of one well lie much closer together than adjacent wells, and wells may have unequal field
-   counts.
-2. Well centroids are clustered on Y (1-D average linkage) into *n*<sub>rows</sub> bands. Every band must
-   contain exactly *n*<sub>cols</sub> wells.
-3. Within each row band, centroids are clustered on X into *n*<sub>cols</sub> bands. Every band must contain
-   exactly one well.
-4. Bands are ordered by coordinate and mapped to row letters and column numbers. Because geometry alone
-   cannot tell which physical corner is A1, the row and column order can be reversed (`flip_rows`,
-   `flip_cols`), and the operator confirms the orientation on a QC plot.
+**Geometry (fallback).** If any scene lacks a well ID, assignments are inferred from each scene's stage
+position, taken as the (Y, X) start coordinate of its first subblock in the subblock directory (no pixel data
+is decoded). Only part of the plate may have been imaged, so the number of wells is not assumed.
+1. Y and X coordinates are each sorted and split into bands (rows and columns) at gaps wider than 0.35 × the
+   nominal well pitch (SBS pitch for the plate format, e.g. 9 mm for 96 wells, divided by the pixel size).
+   Without a pixel size, the split is at the gaps that clearly exceed the rest (> half the largest gap,
+   provided it is > 4× the median gap).
+2. The working pitch is the median spacing between neighbouring band centres (mid-ranges) that are one well
+   apart, which absorbs small differences between stage scaling and the nominal pitch.
+3. Every band must be narrower than 0.85 pitch, and every band centre must lie within 0.35 pitch of the
+   integer grid. Otherwise the mapping is refused, so neighbouring rows or columns (e.g. under plate tilt) are
+   never merged or misnumbered.
+4. Bands are numbered by their distance from the first band in pitches, so skipped rows and columns are
+   preserved, and labelled relative to the operator-supplied first imaged well (the imaged well closest to A1;
+   default A1). Because geometry alone cannot tell which physical corner is A1, the row and column order can be
+   reversed (`flip_rows`, `flip_cols`).
 
-If any of steps 1–3 does not produce a complete grid, the mapping is refused (no partial mapping is ever used)
-and a diagnostic plot colored by row band is written.
+The operator confirms the first well and orientation on a QC plot. If any check fails, no mapping is used, and
+a diagnostic plot colored by row band is written.
 
 In both modes, a QC table (`scene_to_well.csv`) and plot (`scene_to_well_qc.png`) are written. Extraction
 does not start until the mapping has been confirmed: interactively in the GUI, by a prompt in the CLI, or

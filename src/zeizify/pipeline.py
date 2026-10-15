@@ -51,14 +51,14 @@ def read_czi_info(xml: str) -> CziInfo:
 
 
 def map_scenes(czi_path: Path, out_dir: Path, plate: PlateFormat = DEFAULT_PLATE, flip_rows: bool = False,
-               flip_cols: bool = False, log: Log = print) -> tuple[SceneWellMapping, Path]:
+               flip_cols: bool = False, log: Log = print, first_well: str = "A1") -> tuple[SceneWellMapping, Path]:
     """Build the mapping and write its QC CSV/PNG. Returns (mapping, qc_png_path)."""
     from czifile import CziFile
 
     qc_dir = out_dir / QC_SUBDIR
-    mapping = build_mapping(czi_path, plate, flip_rows, flip_cols, debug_dir=qc_dir)
+    mapping = build_mapping(czi_path, plate, flip_rows, flip_cols, debug_dir=qc_dir, first_well=first_well)
     log(f"Scene -> well source: {mapping.source}"
-        + (" (ZEN ArrayName metadata)" if mapping.source == "metadata" else " (stage-position clustering)"))
+        + (" (well IDs recorded by ZEN)" if mapping.source == "metadata" else " (inferred from stage positions)"))
     log(f"{len(mapping.scenes)} scenes -> {len(mapping.well_labels)} wells")
     for note in mapping.notes:
         log("  " + note)
@@ -132,6 +132,7 @@ def write_manifest(out_dir: Path, czi_path: Path, plate_map_path: Path, plate: P
             "source": mapping.source,
             "flip_rows": flip_rows if mapping.source == "geometry" else None,
             "flip_cols": flip_cols if mapping.source == "geometry" else None,
+            "first_well": mapping.first_well,
             "n_scenes": len(mapping.scenes),
             "n_wells": len(mapping.well_labels),
             "notes": mapping.notes,

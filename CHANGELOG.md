@@ -3,6 +3,22 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.2.1] - 2026-10-15
+
+### Fixed
+- **Well IDs stored as Shape names are now read.** ZEN acquisitions that do not write `<ArrayName>` record each
+  scene's well as `<Shape Name="A2">`. Zeizify now reads it, as czitools does, instead of falling back to
+  geometry.
+- **Partially imaged plates no longer fail in the geometry fallback.** The fallback assumed every well of the
+  plate was imaged and forced the scenes into 96 clusters, so imaging e.g. only columns 2–5 failed with
+  "row-band sizes … expected 12". It now detects the imaged rows and columns from the gaps between wells,
+  accounts for skipped rows/columns using the well pitch, and refuses (rather than guesses) when a band is
+  wider than a well or off the grid.
+
+### Added
+- "First imaged well" setting for the geometry fallback (GUI field on the mapping card, CLI `--first-well`,
+  defaulting to the labeled well closest to A1 in the plate map), recorded in `run_manifest.json`.
+
 ## [1.2.0] - 2026-10-14
 
 ### Added

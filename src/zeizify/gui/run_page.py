@@ -91,6 +91,7 @@ class RunPage(ctk.CTkFrame):
         self.plate_map: "str | None" = None
         self.out: "str | None" = None
         self.flip_rows = self.flip_cols = False
+        self.first_well = "A1"
         self.mapping = None
         self.cancel = threading.Event()
         self.busy = False
@@ -216,6 +217,7 @@ class RunPage(ctk.CTkFrame):
             self.set_plate_map(str(editor.write_csv_to(out / "plate_map.csv")))
         self.plate = editor.state.plate
         self.flip_rows = self.flip_cols = False
+        self.first_well = self._guess_first_well()
         self.cancel.clear()
         self.app.settings.add_recent(self.czi, self.out, self.plate_map)
         self.app.refresh_recents()
@@ -234,7 +236,7 @@ class RunPage(ctk.CTkFrame):
 
         def work():
             return pipeline.map_scenes(Path(self.czi), Path(self.out), self.plate, self.flip_rows, self.flip_cols,
-                                       log=lines.append)
+                                       log=lines.append, first_well=self.first_well)
 
         def done(res):
             bar.stop()
@@ -256,6 +258,10 @@ class RunPage(ctk.CTkFrame):
             plot = getattr(exc, "debug_plot", None) if isinstance(exc, MappingError) else None
             if plot:
                 self._image(m, plot)
+            if isinstance(exc, MappingError):
+                m.text("If only part of the plate was imaged, enter the imaged well closest to A1 and retry. "
+                       "Also check the plate format on the Plate map page.", muted=True)
+                self._first_well_row(m)
 
         self.app.run_bg(work, done, fail)
 
@@ -268,15 +274,58 @@ class RunPage(ctk.CTkFrame):
         ctk.CTkLabel(frame, text="", image=ctk.CTkImage(img, img, size=(w, h))).pack(padx=8, pady=8)
         frame.bind("<Double-Button-1>", lambda e: open_path(path))
 
+    def _guess_first_well(self) -> str:
+        """The labeled well closest to A1 in the plate map - a good default for partial plates."""
+        try:
+            from ..plate import load_plate_map, parse_well
+
+            wells = [parse_well(w) for w in load_plate_map(Path(self.plate_map))]
+            if wells:
+                letters = self.plate.row_letters
+                r = min(letters.index(w[0]) for w in wells if w[0] in letters)
+                c = min(w[1] for w in wells)
+                return f"{letters[r]}{c}"
+        except Exception:  # noqa: BLE001 - a guess only
+            pass
+        return "A1"
+
+    def _first_well_row(self, m: Message) -> None:
+        row = ctk.CTkFrame(m.body, fg_color="transparent")
+        row.pack(fill="x", pady=(10, 0))
+        ctk.CTkLabel(row, text="First imaged well", font=T.font(12), text_color=T.TEXT).pack(side="left", padx=(0, 8))
+        entry = ctk.CTkEntry(row, width=70, height=30, corner_radius=8, border_color=T.BORDER, fg_color=T.SURFACE_ALT,
+                             font=T.font(12))
+        entry.insert(0, self.first_well)
+        entry.pack(side="left")
+        ctk.CTkLabel(row, text="the imaged well closest to A1, e.g. A2 if you started in column 2", font=T.font(11),
+                     text_color=T.MUTED).pack(side="left", padx=10)
+
+        def apply():
+            from ..plate import normalize_well
+
+            try:
+                self.first_well = normalize_well(entry.get())
+            except ValueError:
+                self.app.toast("Enter a well ID such as A2.", kind="warning")
+                return
+            btn.configure(state="disabled")
+            self._map()
+
+        btn = ghost_button(row, "Re-map", apply, width=80, height=30)
+        btn.pack(side="left")
+        entry.bind("<Return>", lambda e: apply())
+
     def _qc_card(self, m: Message, mapping, png: Path) -> None:
         if mapping.source == "metadata":
-            m.text("Well IDs were read directly from the CZI metadata (ZEN ArrayName), so there is no orientation to "
-                   "flip. Skim the plot for anything obviously wrong, then continue.")
+            m.text("Well IDs were read directly from the well names ZEN stored in the CZI, so there is no orientation "
+                   "to flip. Skim the plot for anything obviously wrong, then continue.")
         else:
             row = "bottom" if self.flip_rows else "top"
             col = "right" if self.flip_cols else "left"
             m.text("This CZI has no well-ID metadata, so wells were inferred from stage positions. Confirm that the "
-                   f"layout matches how the plate was scanned. Current assumption: A1 at {row}-{col}.")
+                   f"layout matches how the plate was scanned. Current assumption: first imaged well "
+                   f"{mapping.first_well}, A1 at {row}-{col}.")
+            self._first_well_row(m)
         self._image(m, png)
         a = m.actions()
         btns = []

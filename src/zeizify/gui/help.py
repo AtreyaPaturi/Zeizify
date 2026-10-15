@@ -90,8 +90,12 @@ HELP: dict[str, dict] = {
                 "A plot of every field's stage position, labeled by well, appears in the timeline.",
                 "If the well IDs came from the CZI metadata (most ZEN plate acquisitions), just check that the "
                 "plot looks like your plate and press 'Looks correct — continue'.",
-                "If the file has no well IDs, they were inferred from positions. Use Flip rows / Flip columns "
-                "until A1 is where it physically was on the plate, then continue.",
+                "If the file has no well IDs, they were inferred from positions. Partially imaged plates are "
+                "fine: set 'First imaged well' to the imaged well closest to A1 (e.g. A2 if you started in column "
+                "2 - it is pre-filled from your plate map) and press Re-map. Use Flip rows / Flip columns until "
+                "the labels match the plate, then continue.",
+                "If mapping fails, the message says why and shows a diagnostic plot; check the first well and the "
+                "plate format (Plate map page), then retry from the same card.",
                 "Nothing is extracted until you confirm. Cancel stops safely.",
                 "Open plot shows the full-resolution image.",
             ]),

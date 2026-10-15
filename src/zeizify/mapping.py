@@ -1,39 +1,49 @@
 """
 Scene -> well mapping for a multi-well-plate CZI acquired as scenes = wells x fields.
 
-Primary method - metadata. Every <Scene> element written by ZEN for a plate
-acquisition carries an <ArrayName> (e.g. "A1"): the well ID assigned by the
-acquisition software itself. This is ground truth, has no orientation ambiguity and
-is used whenever every scene has one. When the scene's <Shape> also carries
-RowIndex/ColumnIndex, those are cross-checked against ArrayName as an independent
-consistency test (the same fields ZEISS' czitools exposes as well_rowID/well_colID).
+Primary method - metadata. ZEN records each scene's well in its <Scene> element: as
+<ArrayName> (e.g. "A1") in plate-carrier acquisitions, or as the name of the scene's
+<Shape> (e.g. <Shape Name="A2">) in others - the same two fields, in the same order of
+preference, that ZEISS' czitools reads. This is ground truth, has no orientation ambiguity
+and is used whenever every scene has a well ID. When the Shape also carries RowIndex /
+ColumnIndex, those are cross-checked against the well ID as an independent consistency test.
 
-Fallback method - geometry. If any scene lacks ArrayName (older acquisitions, other
-software), well identity is recovered from each scene's absolute stage position (the
-subblock start offset on the Y/X axes; metadata only, no pixel data is decoded):
+Fallback method - geometry. If any scene lacks a well ID, wells are recovered from each
+scene's stage position (the subblock start offset on the Y/X axes; metadata only, no pixel
+data is decoded). Only part of the plate may have been imaged (e.g. columns 2-5), so the
+number of wells is not assumed:
   1. Take one subblock's (Y, X) start per scene.
-  2. Agglomeratively cluster scenes into n_wells groups - fields of one well sit far
-     closer together than two different wells do. Field counts may differ per well.
-  3. Cluster the well centroids' Y values into n_rows bands and, within each band,
-     their X values into n_cols bands; every band must come out full or we refuse.
-  4. Map band index -> row letter / column number.
-Step 4 is a genuine ambiguity (geometry tells us adjacency, not which physical corner
-is A1); it is resolved by flip_rows/flip_cols and confirmed by a human on the QC plot.
+  2. Split the scenes' Y values into row bands and their X values into column bands at the
+     gaps between wells: gaps wider than ~1/3 of the well pitch (from the plate format and
+     pixel size), or - when the pixel size is unknown - the clearly-largest gaps.
+  3. Check every band is narrower than one well pitch, so that two rows (or columns) can
+     never be merged silently, e.g. by plate tilt.
+  4. Number the bands by their distance from the first band in units of the well pitch, so
+     rows/columns skipped during acquisition are accounted for.
+  5. Label wells relative to the first imaged well (default A1, e.g. A2 when imaging started
+     in column 2), optionally reversing row/column order.
+Steps 4-5 are a genuine ambiguity - geometry tells us adjacency, not which physical well
+is which - so the first well and flip_rows/flip_cols are confirmed by a human on the QC plot.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
 
 import numpy as np
-from scipy.cluster.hierarchy import fcluster, linkage
 
-from .czi_metadata import SceneInfo, read_scenes
-from .plate import DEFAULT_PLATE, PlateFormat, normalize_well
+from .czi_metadata import SceneInfo, read_pixel_size_um, read_scenes
+from .plate import DEFAULT_PLATE, PlateFormat, normalize_well, parse_well
 
 Log = Callable[[str], None]
+
+_WELL_SHAPE = re.compile(r"^[A-Pa-p]0?\d{1,2}$")
+
+# Center-to-center well spacing of ANSI/SLAS (SBS) plates, in mm.
+SBS_PITCH_MM = {6: 39.12, 12: 26.01, 24: 19.3, 48: 13.08, 96: 9.0, 384: 4.5}
 
 
 class MappingError(ValueError):
@@ -53,6 +63,7 @@ class SceneWellMapping:
     well_centroids: np.ndarray  # (n_wells, 2) (Y, X)
     source: str  # "metadata" or "geometry"
     notes: list[str] = field(default_factory=list)
+    first_well: "str | None" = None  # geometry only: the imaged well closest to A1
 
     def well_to_scenes(self) -> dict[str, list[int]]:
         out: dict[str, list[int]] = {}
@@ -73,23 +84,36 @@ def scene_positions(entries: Iterable) -> dict[int, tuple[int, int]]:
 
 
 def mapping_from_metadata(scenes: list[SceneInfo]) -> "dict[int, str] | None":
-    """Scene -> well from ArrayName. None (never a partial result) if any scene lacks it, so
-    the caller falls back to geometry rather than silently trusting an incomplete mapping."""
+    """Scene -> well from ArrayName, else Shape/@Name. None (never a partial result) if any scene
+    lacks a valid well ID, so the caller falls back to geometry rather than silently trusting an
+    incomplete mapping."""
     if not scenes:
         return None
     mapping: dict[int, str] = {}
     for s in scenes:
-        if not s.array_name:
+        if not s.well_name:
+            return None
+        # Shape names are free text in non-plate experiments (e.g. tile region "TR1"): only accept the
+        # well-ID shape A1..P24. ArrayName is written by ZEN's plate carrier and is trusted as-is.
+        if not s.array_name and not _WELL_SHAPE.match(s.shape_name):
             return None
         try:
-            mapping[s.index] = normalize_well(s.array_name)
+            mapping[s.index] = normalize_well(s.well_name)
         except ValueError:
             return None
     return mapping
 
 
+def metadata_tag(scenes: list[SceneInfo]) -> str:
+    if all(s.array_name for s in scenes):
+        return "ArrayName"
+    if not any(s.array_name for s in scenes):
+        return "Shape name"
+    return "ArrayName / Shape name"
+
+
 def crosscheck_shape_indices(scenes: list[SceneInfo], plate: PlateFormat) -> "str | None":
-    """Independent check of ArrayName against Shape/RowIndex+ColumnIndex. Returns a human-
+    """Independent check of the well ID against Shape/RowIndex+ColumnIndex. Returns a human-
     readable note, or None if the indices aren't recorded. Accepts either a 0- or 1-based
     convention, as long as one convention fits every scene."""
     if not scenes or any(s.row_index is None or s.col_index is None for s in scenes):
@@ -99,16 +123,18 @@ def crosscheck_shape_indices(scenes: list[SceneInfo], plate: PlateFormat) -> "st
         ok = True
         for s in scenes:
             r = s.row_index - base
-            if not (0 <= r < len(letters)) or normalize_well(s.array_name) != f"{letters[r]}{s.col_index - base + 1}":
+            if not (0 <= r < len(letters)) or normalize_well(s.well_name) != f"{letters[r]}{s.col_index - base + 1}":
                 ok = False
                 break
         if ok:
-            return f"ArrayName agrees with Shape Row/ColumnIndex ({base}-based) for all {len(scenes)} scenes."
-    return "WARNING: ArrayName disagrees with Shape Row/ColumnIndex for some scenes - inspect the QC plot."
+            return f"Well IDs agree with Shape Row/ColumnIndex ({base}-based) for all {len(scenes)} scenes."
+    return "WARNING: well IDs disagree with Shape Row/ColumnIndex for some scenes - inspect the QC plot."
 
 
 def cluster_1d(values: np.ndarray, n_clusters: int) -> np.ndarray:
     """Cluster a 1D array into n_clusters groups; labels 0..n-1 ordered by increasing value."""
+    from scipy.cluster.hierarchy import fcluster, linkage
+
     if n_clusters == 1:
         return np.zeros(len(values), dtype=int)
     Z = linkage(values.reshape(-1, 1), method="average")
@@ -119,68 +145,136 @@ def cluster_1d(values: np.ndarray, n_clusters: int) -> np.ndarray:
     return np.array([remap[c] for c in raw])
 
 
+def split_bands(values: np.ndarray, gap: "float | None") -> np.ndarray:
+    """Band label (0..k-1, by increasing value) per value, splitting sorted values at gaps > gap.
+    With gap=None the threshold is half the largest gap, used only if that gap clearly stands
+    out (> 4x the median gap); otherwise everything is one band."""
+    order = np.argsort(values)
+    d = np.diff(values[order])
+    if len(d) == 0:
+        return np.zeros(len(values), dtype=int)
+    if gap is None:
+        md, med = float(d.max()), float(np.median(d))
+        gap = md / 2 if md > 4 * max(med, 1.0) else np.inf
+    labels_sorted = np.concatenate([[0], np.cumsum(d > gap)])
+    labels = np.empty(len(values), dtype=int)
+    labels[order] = labels_sorted
+    return labels
+
+
+def _midranges(values: np.ndarray, labels: np.ndarray) -> np.ndarray:
+    return np.array([(values[labels == b].min() + values[labels == b].max()) / 2 for b in range(labels.max() + 1)])
+
+
+def _extents(values: np.ndarray, labels: np.ndarray) -> np.ndarray:
+    return np.array([np.ptp(values[labels == b]) for b in range(labels.max() + 1)])
+
+
 def geometric_mapping(
     positions: dict[int, tuple[int, int]],
     plate: PlateFormat = DEFAULT_PLATE,
     flip_rows: bool = False,
     flip_cols: bool = False,
     debug_dir: "Path | None" = None,
+    px_size_um: "float | None" = None,
+    first_well: str = "A1",
 ) -> tuple[dict[int, str], list[str]]:
-    """Fallback path: scene -> well purely from stage position. Returns (mapping, notes)."""
+    """Fallback path: scene -> well purely from stage position. Returns (mapping, notes).
+    Works for full and partially imaged plates; first_well is the imaged well closest to A1."""
     from .qc import save_debug_plot
 
     scenes = sorted(positions)
-    pts = np.array([positions[s] for s in scenes], dtype=float)
-    n_rows, n_cols, n_wells = plate.n_rows, plate.n_cols, plate.n_wells
-    if len(scenes) < n_wells:
-        raise MappingError(
-            f"only {len(scenes)} scenes found, fewer than the {n_wells} wells of a {plate.name} plate - "
-            f"is the plate format right?"
-        )
+    pts = np.array([positions[s] for s in scenes], dtype=float).reshape(-1, 2)
+    if len(scenes) == 0:
+        raise MappingError("no scenes found in the CZI")
+    ys, xs = pts[:, 0], pts[:, 1]
 
-    # Step 1: fields -> wells.
-    field_cluster = fcluster(linkage(pts, method="average"), t=n_wells, criterion="maxclust")
-    well_ids = np.unique(field_cluster)
-    if len(well_ids) != n_wells:
-        sizes = sorted(int(s) for s in np.bincount(field_cluster)[1:] if s > 0)
-        raise MappingError(f"expected {n_wells} well clusters, got {len(well_ids)} (sizes {sizes})")
-    centroids = np.array([pts[field_cluster == w].mean(axis=0) for w in well_ids])
-    field_counts = np.array([int((field_cluster == w).sum()) for w in well_ids])
+    nominal = None
+    if px_size_um and plate.n_wells in SBS_PITCH_MM:
+        nominal = SBS_PITCH_MM[plate.n_wells] * 1000.0 / px_size_um  # well pitch in pixels
 
-    def fail(msg: str, row_band: np.ndarray) -> MappingError:
-        plot = save_debug_plot(debug_dir, pts, centroids, row_band, msg) if debug_dir else None
+    def fail(msg: str, labels: np.ndarray) -> MappingError:
+        plot = save_debug_plot(debug_dir, pts, pts, labels, msg) if debug_dir else None
         return MappingError(msg + (f" See {plot}." if plot else ""), plot)
 
-    # Step 2/3: snap well centroids onto the grid.
-    row_band = cluster_1d(centroids[:, 0], n_rows)
-    row_sizes = [int((row_band == r).sum()) for r in range(n_rows)]
-    if row_sizes != [n_cols] * n_rows:
-        raise fail(f"row-band sizes {row_sizes}, expected {n_cols} in each of {n_rows} rows "
-                   f"(a well likely sits near a row boundary - plate tilt?)", row_band)
-    col_band = np.empty(n_wells, dtype=int)
-    for r in range(n_rows):
-        idx = np.where(row_band == r)[0]
-        cb = cluster_1d(centroids[idx, 1], n_cols)
-        col_sizes = [int((cb == c).sum()) for c in range(n_cols)]
-        if col_sizes != [1] * n_cols:
-            raise fail(f"row-band {r} column sizes {col_sizes}, expected one well per column", row_band)
-        col_band[idx] = cb
+    # Step 2: bands at the gaps between wells.
+    gap = 0.35 * nominal if nominal else None
+    row_band, col_band = split_bands(ys, gap), split_bands(xs, gap)
+    row_c, col_c = _midranges(ys, row_band), _midranges(xs, col_band)
 
-    # Step 4: band -> label, with the human-confirmed orientation.
-    row_i = (n_rows - 1 - row_band) if flip_rows else row_band
-    col_i = (n_cols - 1 - col_band) if flip_cols else col_band
+    # Well pitch actually used: the median spacing between neighbouring bands that are one well apart
+    # (stage scaling can differ a few % from nominal, and band centres shift with where the fields
+    # happen to sit, so neither the nominal value nor the single closest pair is reliable on its own).
+    spacings = np.concatenate([np.diff(row_c), np.diff(col_c)])
+    if nominal:
+        single = spacings[(spacings > 0.6 * nominal) & (spacings < 1.4 * nominal)]
+        pitch = float(np.median(single)) if len(single) else nominal
+    elif len(spacings):
+        single = spacings[spacings < 1.5 * spacings.min()]
+        pitch = float(np.median(single))
+    else:
+        pitch = None
+
+    # Step 3: no band may be wider than a well.
+    if pitch:
+        for axis, vals, lab in (("row", ys, row_band), ("column", xs, col_band)):
+            ext = _extents(vals, lab)
+            if ext.max() > 0.85 * pitch:
+                raise fail(f"a {axis} band spans {ext.max() / pitch:.1f} well pitches - fields of neighbouring "
+                           f"{axis}s overlap (plate tilt, or the wrong plate format?)", row_band)
+
+    # Step 4: band -> grid index, leaving room for skipped rows/columns.
+    def indices(centers: np.ndarray, axis: str) -> np.ndarray:
+        if not pitch or len(centers) == 1:
+            return np.arange(len(centers))
+        steps = (centers - centers[0]) / pitch
+        idx = np.rint(steps).astype(int)
+        worst = float(np.max(np.abs(steps - idx)))
+        if worst > 0.35:
+            raise fail(f"{axis} spacing is irregular: a {axis} sits {worst:.2f} well pitches off the grid - cannot "
+                       f"tell whether a {axis} was skipped (wrong plate format?)", row_band)
+        if np.any(np.diff(idx) < 1):
+            raise fail(f"two {axis} bands are closer than one well pitch - cannot tell the {axis}s apart", row_band)
+        return idx
+
+    r_idx, c_idx = indices(row_c, "row")[row_band], indices(col_c, "column")[col_band]
+    n_r, n_c = int(r_idx.max()) + 1, int(c_idx.max()) + 1
+    if flip_rows:
+        r_idx = n_r - 1 - r_idx
+    if flip_cols:
+        c_idx = n_c - 1 - c_idx
+
+    # Step 5: absolute labels from the first imaged well.
+    try:
+        fr, fc = parse_well(first_well)
+    except ValueError as exc:
+        raise MappingError(f"first well {first_well!r} is not a well ID") from exc
     letters = plate.row_letters
-    well_label = np.array([f"{letters[r]}{c + 1}" for r, c in zip(row_i, col_i)])
+    if fr not in letters or not 1 <= fc <= plate.n_cols:
+        raise MappingError(f"first well {first_well} is not on a {plate.name} plate")
+    r0, c0 = letters.index(fr), fc - 1
+    if r0 + n_r > plate.n_rows or c0 + n_c > plate.n_cols:
+        last = f"{letters[min(r0 + n_r, plate.n_rows) - 1]}{min(c0 + n_c, plate.n_cols)}"
+        raise fail(f"the imaged area spans {n_r} rows x {n_c} columns; starting at {fr}{fc} it would run past "
+                   f"the edge of a {plate.name} plate (last well {last}). Check the first well and plate format.",
+                   row_band)
+    wells = [f"{letters[r0 + r]}{c0 + c + 1}" for r, c in zip(r_idx, c_idx)]
+    scene_to_well = dict(zip(scenes, wells))
 
-    notes = []
-    modal = int(np.bincount(field_counts).argmax())
-    uneven = sorted((str(w), int(c)) for w, c in zip(well_label, field_counts) if c != modal)
+    present = sorted(set(wells), key=lambda w: (w[0], int(w[1:])))
+    notes = [f"Detected {len(present)} imaged well(s) in {len(row_c)} row(s) x {len(col_c)} column(s), "
+             f"{present[0]}–{present[-1]}" + (f" (well pitch {pitch:.0f} px)" if pitch else "") + "."]
+    skipped_r = n_r - len(row_c)
+    skipped_c = n_c - len(col_c)
+    if skipped_r or skipped_c:
+        notes.append(f"Gaps in the imaged grid: {skipped_r} row(s) and {skipped_c} column(s) skipped.")
+    counts = {w: wells.count(w) for w in present}
+    modal = max(set(counts.values()), key=list(counts.values()).count)
+    uneven = [(w, c) for w, c in counts.items() if c != modal]
     if uneven:
         notes.append(f"{len(uneven)} well(s) differ from the usual {modal} fields: "
                      + ", ".join(f"{w}={c}" for w, c in uneven))
-
-    label_of_cluster = dict(zip(well_ids.tolist(), well_label.tolist()))
-    return {s: label_of_cluster[int(c)] for s, c in zip(scenes, field_cluster)}, notes
+    return scene_to_well, notes
 
 
 def _assemble(scene_to_well: dict[int, str], positions: dict[int, tuple[int, int]], source: str, notes: list[str]) -> SceneWellMapping:
@@ -200,6 +294,8 @@ def mapping_from_inputs(
     flip_rows: bool = False,
     flip_cols: bool = False,
     debug_dir: "Path | None" = None,
+    px_size_um: "float | None" = None,
+    first_well: str = "A1",
 ) -> SceneWellMapping:
     """Core decision logic, independent of file I/O (see build_mapping)."""
     meta = mapping_from_metadata(scenes_meta)
@@ -209,21 +305,22 @@ def mapping_from_inputs(
         unexpected = sorted(set(scene_to_well.values()) - expected)
         if unexpected:
             raise MappingError(
-                f"ArrayName references well(s) outside a {plate.name} plate: {unexpected[:10]} - "
+                f"Well IDs in the metadata lie outside a {plate.name} plate: {unexpected[:10]} - "
                 f"choose the right plate format."
             )
-        notes = []
-        check = crosscheck_shape_indices([s for s in scenes_meta if s.index in positions], plate)
+        used = [s for s in scenes_meta if s.index in positions]
+        notes = [f"Well IDs read from each scene's {metadata_tag(used)}."]
+        check = crosscheck_shape_indices(used, plate)
         if check:
             notes.append(check)
-        missing = sorted(expected - set(scene_to_well.values()))
-        if missing:
-            notes.append(f"{len(missing)} well(s) have no scenes: {', '.join(missing[:24])}"
-                         + (" ..." if len(missing) > 24 else ""))
+        present = sorted(set(scene_to_well.values()), key=lambda w: (w[0], int(w[1:])))
+        notes.append(f"{len(present)} imaged well(s): {', '.join(present[:24])}" + (" ..." if len(present) > 24 else ""))
         return _assemble(scene_to_well, positions, "metadata", notes)
 
-    scene_to_well, notes = geometric_mapping(positions, plate, flip_rows, flip_cols, debug_dir)
-    return _assemble(scene_to_well, positions, "geometry", notes)
+    scene_to_well, notes = geometric_mapping(positions, plate, flip_rows, flip_cols, debug_dir, px_size_um, first_well)
+    mapping = _assemble(scene_to_well, positions, "geometry", notes)
+    mapping.first_well = normalize_well(first_well)
+    return mapping
 
 
 def build_mapping(
@@ -232,15 +329,17 @@ def build_mapping(
     flip_rows: bool = False,
     flip_cols: bool = False,
     debug_dir: "Path | None" = None,
+    first_well: str = "A1",
 ) -> SceneWellMapping:
-    """Open a CZI and map its scenes to wells. flip_rows/flip_cols only affect the
+    """Open a CZI and map its scenes to wells. flip_rows/flip_cols/first_well only affect the
     geometry fallback. If debug_dir is given, a failed fallback leaves a diagnostic plot."""
     from czifile import CziFile
 
     with CziFile(str(czi_path)) as czi:
         positions = scene_positions(czi.filtered_subblock_directory)
         try:
-            scenes_meta = read_scenes(czi.metadata())
+            xml = czi.metadata()
+            scenes_meta, px = read_scenes(xml), read_pixel_size_um(xml)
         except Exception:  # noqa: BLE001 - unreadable metadata just means "use geometry"
-            scenes_meta = []
-    return mapping_from_inputs(positions, scenes_meta, plate, flip_rows, flip_cols, debug_dir)
+            scenes_meta, px = [], None
+    return mapping_from_inputs(positions, scenes_meta, plate, flip_rows, flip_cols, debug_dir, px, first_well)
