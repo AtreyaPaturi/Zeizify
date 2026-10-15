@@ -120,9 +120,11 @@ axis, cell types side by side, one color per cell type):
 - `<panel>_spots_per_nucleus.png`: for each channel, spots per nucleus as a SuperPlot, and the fraction of
   nuclei in each count class (0, then classes scaled to the 95th percentile of counts, e.g. 1-5, 6-10, 11-20,
   21-30, ≥ 31), pooled over replicates (`spot_count_distribution.csv`);
-- `<panel>_overview.png`, and one PNG per metric in `<panel>/`: nuclei as small dots, replicate medians as
-  large dots (one marker per replicate when a Replicate column defines biological replicates), and mean ± SD
-  of the replicate medians.
+- `<panel>_overview.png`, and one PNG per metric in `<panel>/`: nuclei as a beeswarm colored by replicate,
+  each replicate's median as a large dot of the same color with area proportional to its number of nuclei,
+  and mean ± SD of the replicate medians in black. The x axis has two levels: cell type under each column,
+  treatment underlined beneath. Replicate labels from a Replicate column keep their color across
+  conditions; with wells as replicates they are numbered 1, 2, 3 within each condition.
 
 **Order.** Treatments: controls (MOCK, DMSO, ...) first, then in plate-map order (the first well, row by row,
 in which each appears), so MOCK, ML792, MG132, ML792+MG132 laid out down a column plot in that order. Cell

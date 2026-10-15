@@ -52,8 +52,7 @@ COLOC_METRICS = {
 SUPERPLOT_CHANNEL = ["spots_n", "spots_area_frac", "cv", "enrichment"]
 SUPERPLOT_COLOC = ["pearson", "tm1", "tm2", "frac_a_overlap"]
 WILDTYPE_KEYWORDS = ("wt", "wildtype", "wild", "parental", "control", "ctrl")
-CELL_TYPE_COLORS = ["#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B3", "#937860", "#DA8BC3", "#8C8C8C"]
-REPLICATE_MARKERS = "osD^vPX*<>"
+REPLICATE_COLORS = ["#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#0072B2", "#D55E00", "#F0E442", "#999999"]  # Okabe-Ito
 
 
 def is_control(treatment) -> bool:
@@ -297,62 +296,155 @@ def _p_text(omni: pd.DataFrame, ab, metric, feat, cell_types) -> str:
     return ("Welch p: " + " · ".join(parts)) if parts else ""
 
 
-def _xticks(ax, labels: list) -> None:
-    long_labels = max((len(t) for t in labels), default=0) > 6
-    ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels(labels, rotation=30 if long_labels else 0, ha="right" if long_labels else "center", fontsize=8)
-    ax.set_xlim(-0.6, len(labels) - 0.4)
+def _ylim(values: np.ndarray) -> tuple[float, float]:
+    v = values[np.isfinite(values)]
+    if not len(v):
+        return 0.0, 1.0
+    lo, hi = float(v.min()), float(v.max())
+    if lo >= 0 and lo < 0.25 * hi:
+        lo = 0.0
+    pad = 0.04 * ((hi - lo) or 1.0)
+    return lo - (pad if lo != 0 else 0.5 * pad), hi + pad
+
+
+def _positions(t_order: list, ct_order: list, gap: float = 0.6) -> dict:
+    """x position of each (treatment, cell type): cell types side by side within a treatment group."""
+    n = max(1, len(ct_order))
+    return {(t, c): i * (n + gap) + j for i, t in enumerate(t_order) for j, c in enumerate(ct_order or [""])}
+
+
+def _group_axis(ax, t_order: list, ct_order: list, pos: dict) -> None:
+    """Two-level x axis: cell type under each column, treatment underlined beneath its columns."""
+    from matplotlib.transforms import offset_copy
+
+    xs = list(pos.values())
+    ax.set_xlim(min(xs, default=0) - 0.6, max(xs, default=0) + 0.6)
+    if len(ct_order) <= 1:
+        ax.set_xticks([pos[(t, ct_order[0] if ct_order else "")] for t in t_order])
+        ax.set_xticklabels(t_order, fontsize=9)
+        return
+    ax.set_xticks([pos[(t, c)] for t in t_order for c in ct_order])
+    ax.set_xticklabels([c for _ in t_order for c in ct_order], fontsize=8)
+    line_tr = offset_copy(ax.get_xaxis_transform(), fig=ax.figure, y=-19, units="points")
+    for t in t_order:
+        a, b = pos[(t, ct_order[0])], pos[(t, ct_order[-1])]
+        ax.plot([a - 0.4, b + 0.4], [0, 0], transform=line_tr, color="black", lw=0.8, clip_on=False)
+        ax.annotate(t, xy=((a + b) / 2, 0), xycoords=("data", "axes fraction"), xytext=(0, -22),
+                    textcoords="offset points", ha="center", va="top", fontsize=9)
+
+
+def _box(ax) -> None:
+    for s in ax.spines.values():
+        s.set_visible(True)
+        s.set_linewidth(1.0)
+    ax.tick_params(axis="y", labelsize=8)
+
+
+def _swarm(y: np.ndarray, x_per_pt: float, y_per_pt: float, dot_pt: float, half_width: float,
+           rng: np.random.Generator) -> np.ndarray:
+    """Beeswarm x offsets: values are binned by one dot height and spread sideways within a bin
+    (centre out); the swarm is narrowed to `half_width` if it would overflow its column."""
+    if not len(y):
+        return np.zeros(0)
+    bins = np.floor(y / (dot_pt * y_per_pt)).astype(np.int64)
+    off = np.zeros(len(y))
+    used: dict[int, int] = {}
+    for idx in rng.permutation(len(y)):
+        k = used.get(bins[idx], 0)
+        used[bins[idx]] = k + 1
+        off[idx] = ((k + 1) // 2) * (1 if k % 2 else -1) * dot_pt * x_per_pt
+    m = np.abs(off).max()
+    return off * (half_width / m) if m > half_width else off
+
+
+def _replicate_keys(rep_sub: pd.DataFrame) -> tuple[dict, list, bool]:
+    """Replicate -> legend key. Replicate labels shared across conditions (a Replicate column) keep their
+    label; otherwise (one well per replicate) replicates are numbered 1, 2, 3 within each condition."""
+    r = rep_sub.assign(_r=rep_sub["replicate"].astype(str))
+    conds = r[["_r", "treatment", "cell_type"]].drop_duplicates()
+    shared = bool(len(conds)) and bool(conds["_r"].duplicated().any())
+    keys = {}
+    if shared:
+        for i, lab in enumerate(sorted(conds["_r"].unique())):
+            keys.update({(t, c, lab): lab for t, c in conds.loc[conds["_r"] == lab, ["treatment", "cell_type"]].values})
+        levels = sorted(conds["_r"].unique())
+    else:
+        for (t, c), g in conds.groupby(["treatment", "cell_type"]):
+            for i, lab in enumerate(sorted(g["_r"])):
+                keys[(t, c, lab)] = str(i + 1)
+        levels = sorted(set(keys.values()), key=int)
+    return keys, levels, shared
+
+
+def _size(n: float, n_max: float) -> float:
+    """Marker area (pt^2) of a replicate dot, proportional to its number of nuclei."""
+    return max(18.0, 380.0 * n / max(n_max, 1))
+
+
+def _legend_handles(levels: list, n_max: float) -> list:
+    from matplotlib.lines import Line2D
+    from matplotlib.ticker import MaxNLocator
+
+    hs = [Line2D([], [], ls="", marker="o", markersize=7, color=REPLICATE_COLORS[i % len(REPLICATE_COLORS)],
+                 mec="black", mew=0.6, label=str(lv)) for i, lv in enumerate(levels)]
+    ns = [v for v in MaxNLocator(3, integer=True).tick_values(0, n_max) if 0 < v <= n_max * 1.05] or [n_max]
+    hs.append(Line2D([], [], ls="", label="$n$ (nuclei)"))
+    hs += [Line2D([], [], ls="", marker="o", markersize=math.sqrt(_size(v, n_max)), mfc="white", mec="black",
+                  mew=0.8, label=f"{int(v)}") for v in ns]
+    return hs
+
+
+def add_legend(target, handles: list, **kw) -> None:
+    target.legend(handles=handles, title="Replicate", fontsize=8, title_fontsize=9, frameon=False,
+                  labelspacing=1.1, handletextpad=0.8, borderaxespad=0.2, **kw)
 
 
 def superplot(ax, long_sub: pd.DataFrame, rep_sub: pd.DataFrame, title: str, p_text: str = "",
               t_order: "list | None" = None, ct_order: "list | None" = None, legend: bool = True) -> list:
-    """Grouped SuperPlot (Lord et al. 2020): treatments on x, cell types side by side, one color per
-    cell type. Nuclei are small jittered dots, replicate medians large dots, bar = mean +/- SD of the
-    replicate medians. When replicate labels recur across conditions (biological replicates) each
-    replicate gets its own marker. Returns the legend handles."""
-    from matplotlib.lines import Line2D
-
+    """SuperPlot (Lord et al. 2020): every nucleus as a beeswarm dot colored by replicate; each replicate's
+    median as a large dot of the same color, its area proportional to the number of nuclei; mean +/- SD
+    of the replicate medians in black. Treatments are groups on the x axis, cell types columns within a
+    group. Returns the legend handles."""
     t_order = [t for t in (t_order or level_order(long_sub, "treatment", first=is_control))
                if (rep_sub["treatment"] == t).any()]
     ct_order = [c for c in (ct_order or level_order(long_sub, "cell_type", first=is_wildtype))
                 if (rep_sub["cell_type"] == c).any()]
-    reps = list(dict.fromkeys(rep_sub.sort_values("replicate")["replicate"].astype(str)))
-    conds = rep_sub.assign(_r=rep_sub["replicate"].astype(str))[["_r", "treatment", "cell_type"]].drop_duplicates()
-    shared = bool(len(conds)) and bool(conds["_r"].duplicated().any())
-    markers = {r: (REPLICATE_MARKERS[i % len(REPLICATE_MARKERS)] if shared else "o") for i, r in enumerate(reps)}
-    n = max(1, len(ct_order))
-    slot = 0.8 / n
+    pos = _positions(t_order, ct_order)
+    keys, levels, _ = _replicate_keys(rep_sub)
+    color = {lv: REPLICATE_COLORS[i % len(REPLICATE_COLORS)] for i, lv in enumerate(levels)}
+    n_max = float(rep_sub["n_nuclei"].max()) if len(rep_sub) else 1.0
+
+    ax.set_ylim(*_ylim(long_sub["value"].to_numpy(dtype=float)))
+    _group_axis(ax, t_order, ct_order, pos)
+    fig = ax.figure
+    bb = ax.get_position()
+    w_pt, h_pt = bb.width * fig.get_figwidth() * 72, bb.height * fig.get_figheight() * 72
+    (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
+    x_per_pt, y_per_pt = (x1 - x0) / w_pt, (y1 - y0) / h_pt
+    dot_s = 5.0  # nucleus dot area (pt^2)
     rng = np.random.default_rng(0)
-    for j, ct in enumerate(ct_order):
-        color = CELL_TYPE_COLORS[j % len(CELL_TYPE_COLORS)]
-        for i, t in enumerate(t_order):
-            x = i + (j - (n - 1) / 2) * slot
-            v = long_sub.loc[(long_sub["treatment"] == t) & (long_sub["cell_type"] == ct), "value"].dropna().to_numpy()
-            if len(v):
-                ax.scatter(x + rng.uniform(-0.3, 0.3, len(v)) * slot, v, s=4, color=color, alpha=0.25, lw=0)
-            rs = rep_sub[(rep_sub["treatment"] == t) & (rep_sub["cell_type"] == ct)].sort_values("replicate")
-            step = min(0.08, slot * 0.5 / max(1, len(rs)))
-            for k, (_, r) in enumerate(rs.iterrows()):
-                ax.scatter([x + (k - (len(rs) - 1) / 2) * step], [float(r["median"])], s=50, color=color,
-                           marker=markers[str(r["replicate"])], edgecolor="black", lw=0.8, zorder=3)
-            meds = rs["median"].dropna()
-            if len(meds):
-                m = meds.mean()
-                ax.hlines(m, x - slot * 0.4, x + slot * 0.4, color="black", lw=1.5, zorder=4)
-                if len(meds) > 1:
-                    ax.errorbar(x, m, yerr=meds.std(ddof=1), color="black", capsize=3, lw=1, zorder=4)
-    _xticks(ax, t_order)
+    for (t, ct), x in pos.items():
+        sel = long_sub[(long_sub["treatment"] == t) & (long_sub["cell_type"] == ct)].dropna(subset=["value"])
+        rs = rep_sub[(rep_sub["treatment"] == t) & (rep_sub["cell_type"] == ct)].sort_values("replicate")
+        if len(sel):
+            y = sel["value"].to_numpy(dtype=float)
+            cols = [color.get(keys.get((t, ct, str(r)), ""), "0.5") for r in sel["replicate"].astype(str)]
+            off = _swarm(y - y0, x_per_pt, y_per_pt, math.sqrt(dot_s) * 1.05, 0.42, rng)
+            order = rng.permutation(len(y))  # interleave replicates so none hides another
+            ax.scatter((x + off)[order], y[order], s=dot_s, c=np.asarray(cols, dtype=object)[order], lw=0, zorder=2)
+        meds = rs["median"].dropna()
+        if len(meds) > 1:
+            m, sd = meds.mean(), meds.std(ddof=1)
+            ax.errorbar(x, m, yerr=sd, color="black", capsize=3, lw=1, zorder=3)
+            ax.hlines(m, x - 0.15, x + 0.15, color="black", lw=1.2, zorder=3)
+        for _, r in rs.sort_values("n_nuclei", ascending=False).iterrows():  # small dots on top
+            ax.scatter([x], [float(r["median"])], s=_size(r["n_nuclei"], n_max), zorder=4,
+                       color=color.get(keys.get((t, ct, str(r["replicate"])), ""), "0.5"), edgecolor="black", lw=0.8)
     ax.set_title(title + (f"\n{p_text}" if p_text else ""), fontsize=9)
-    ax.tick_params(axis="y", labelsize=8)
-    for s in ("top", "right"):
-        ax.spines[s].set_visible(False)
-    handles = [Line2D([], [], ls="", marker="o", color=CELL_TYPE_COLORS[j % len(CELL_TYPE_COLORS)], mec="black",
-                      label=ct or "cells") for j, ct in enumerate(ct_order)]
-    if shared:
-        handles += [Line2D([], [], ls="", marker=markers[r], color="white", mec="black", label=f"replicate {r}")
-                    for r in reps]
-    if legend and (len(ct_order) > 1 or shared):
-        ax.legend(handles=handles, fontsize=7, frameon=False, loc="best")
+    _box(ax)
+    handles = _legend_handles(levels, n_max)
+    if legend:
+        add_legend(ax, handles, loc="upper left", bbox_to_anchor=(1.01, 1.0))
     return handles
 
 
@@ -385,7 +477,7 @@ def spot_count_distribution(long: pd.DataFrame) -> pd.DataFrame:
 
 
 def _count_bars(ax, dist: pd.DataFrame, t_order: list, ct_order: list, title: str) -> None:
-    """Stacked bars: fraction of nuclei with 0, 1-2, ... spots; treatments on x, cell types side by side."""
+    """Stacked bars: fraction of nuclei with 0, 1-2, ... spots, on the same two-level axis as the SuperPlots."""
     import matplotlib.pyplot as plt
 
     labels = list(dict.fromkeys(dist["spots"]))
@@ -393,35 +485,27 @@ def _count_bars(ax, dist: pd.DataFrame, t_order: list, ct_order: list, title: st
     colors = {lb: cmap(i / max(1, len(labels) - 1)) for i, lb in enumerate(labels)}
     t_order = [t for t in t_order if (dist["treatment"] == t).any()]
     ct_order = [c for c in ct_order if (dist["cell_type"] == c).any()]
-    n = max(1, len(ct_order))
-    slot = 0.8 / n
-    for j, ct in enumerate(ct_order):
-        for i, t in enumerate(t_order):
-            g = dist[(dist["treatment"] == t) & (dist["cell_type"] == ct)]
-            if not len(g):
-                continue
-            x = i + (j - (n - 1) / 2) * slot
-            bottom = 0.0
-            for lb in labels:
-                f = float(g.loc[g["spots"] == lb, "fraction"].sum())
-                ax.bar(x, f, slot * 0.9, bottom=bottom, color=colors[lb], edgecolor="white", lw=0.5,
-                       label=lb if (i == 0 and j == 0) else None)
-                bottom += f
-            if n > 1:
-                ax.text(x, 1.01, ct, ha="center", va="bottom", fontsize=7, color=CELL_TYPE_COLORS[j % len(CELL_TYPE_COLORS)],
-                        fontweight="bold")
-            ax.text(x, 0.5, f"n={int(g['n_nuclei'].iloc[0])}", ha="center", va="center", fontsize=6, color="white",
-                    rotation=90)
-    _xticks(ax, t_order)
-    ax.set_ylim(0, 1.08 if n > 1 else 1.0)
+    pos = _positions(t_order, ct_order)
+    first = next(iter(pos), None)
+    for (t, ct), x in pos.items():
+        g = dist[(dist["treatment"] == t) & (dist["cell_type"] == ct)]
+        if not len(g):
+            continue
+        bottom = 0.0
+        for lb in labels:
+            f = float(g.loc[g["spots"] == lb, "fraction"].sum())
+            ax.bar(x, f, 0.8, bottom=bottom, color=colors[lb], edgecolor="white", lw=0.5,
+                   label=lb if (t, ct) == first else None)
+            bottom += f
+        ax.text(x, 1.01, f"n={int(g['n_nuclei'].iloc[0])}", ha="center", va="bottom", fontsize=6, color="0.3")
+    ax.set_ylim(0, 1.07)
+    _group_axis(ax, t_order, ct_order, pos)
     ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
     ax.set_ylabel("fraction of nuclei", fontsize=8)
-    ax.tick_params(axis="y", labelsize=8)
     ax.set_title(title, fontsize=9)
-    ax.legend(title="spots / nucleus", fontsize=7, title_fontsize=7, frameon=False, bbox_to_anchor=(1.0, 1.0),
+    _box(ax)
+    ax.legend(title="spots / nucleus", fontsize=8, title_fontsize=9, frameon=False, bbox_to_anchor=(1.01, 1.0),
               loc="upper left")
-    for s in ("top", "right"):
-        ax.spines[s].set_visible(False)
 
 
 def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, out_dir,
@@ -447,7 +531,7 @@ def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, 
         rsub = rep[rep["antibody"] == ab]
         t_order = _ordered(set(lsub["treatment"]), orders["treatment"])
         ct_order = _ordered(set(lsub["cell_type"]), orders["cell_type"])
-        width = max(4.0, 1.1 + 0.45 * len(t_order) * len(ct_order))
+        width = max(3.5, 0.8 + 0.42 * len(t_order) * (max(1, len(ct_order)) + 0.6))
         name = slug(ab) or "panel"
         cts = " vs ".join(c for c in ct_order if c)
         header = f"{ab}{' · ' + cts if cts else ''}"
@@ -455,23 +539,20 @@ def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, 
         # spots per nucleus: SuperPlot + count distribution, one row per channel
         feats = list(dict.fromkeys(lsub.loc[lsub["metric"] == "spots_n", "feature"]))
         if feats:
-            fig, axes = plt.subplots(len(feats), 2, figsize=(2 * width + 1.5, 3.9 * len(feats)), squeeze=False,
-                                     gridspec_kw={"width_ratios": [1, 1.15]})
+            fig, axes = plt.subplots(len(feats), 2, figsize=(2 * width + 3.2, 4.0 * len(feats)), squeeze=False)
             for (a1, a2), feat in zip(axes, feats):
                 ls = lsub[(lsub["metric"] == "spots_n") & (lsub["feature"] == feat)]
                 rs = rsub[(rsub["metric"] == "spots_n") & (rsub["feature"] == feat)]
                 st = ";".join(sorted(set(ls["stain"].astype(str)) - {""})) or feat
                 superplot(a1, ls, rs, f"{st} ({feat}): spots per nucleus",
                           _p_text(omni, ab, "spots_n", feat, ct_order), t_order, ct_order)
-                a1.set_ylabel("spots per nucleus", fontsize=8)
-                a1.set_ylim(bottom=0)
+                a1.set_ylabel("spots per nucleus", fontsize=9)
                 _count_bars(a2, dist[(dist["antibody"] == ab) & (dist["feature"] == feat)], t_order, ct_order,
                             f"{st} ({feat}): distribution (nuclei pooled)")
-            fig.suptitle(f"{header} - spots per nucleus (dots: nuclei; large dots: replicate medians; "
-                         "bar: mean ± SD)", fontsize=11)
+            fig.suptitle(f"{header} - spots per nucleus", fontsize=11)
             fig.tight_layout()
             path = out_dir / f"{name}_spots_per_nucleus.png"
-            fig.savefig(path, dpi=150)
+            fig.savefig(path, dpi=150, bbox_inches="tight")
             plt.close(fig)
             written.append(path)
 
@@ -479,9 +560,9 @@ def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, 
         keys.sort(key=lambda k: ("×" in k[1], k[1], (SUPERPLOT_CHANNEL + SUPERPLOT_COLOC).index(k[0])))
         if not keys:
             continue
-        ncol = 4 if width <= 4.5 else 3 if width <= 6 else 2
+        ncol = 4 if width <= 4.5 else 3 if width <= 6.5 else 2
         nrow = math.ceil(len(keys) / ncol)
-        fig, axes = plt.subplots(nrow, ncol, figsize=(width * ncol, 3.6 * nrow), squeeze=False)
+        fig, axes = plt.subplots(nrow, ncol, figsize=(width * ncol + 1.2, 3.9 * nrow), squeeze=False)
         for ax in axes.ravel()[len(keys):]:
             ax.axis("off")
         handles = []
@@ -493,19 +574,20 @@ def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, 
             label = ls["metric_label"].iloc[0] if len(ls) else m
             title = f"{st} ({feat})\n{label}" if st else f"{feat}\n{label}"
             handles = superplot(ax, ls, rs, title, ptxt, t_order, ct_order, legend=False) or handles
-            f1, a1 = plt.subplots(figsize=(width, 3.8))
+            f1, a1 = plt.subplots(figsize=(width + 1.2, 3.9))
+            f1.subplots_adjust(left=0.12, right=1 - 1.2 / (width + 1.2), bottom=0.2, top=0.85)
             superplot(a1, ls, rs, title, ptxt, t_order, ct_order)
-            f1.tight_layout()
+            a1.set_ylabel(label, fontsize=9)
             p1 = out_dir / name / f"{slug(feat)}_{m}.png"
             p1.parent.mkdir(parents=True, exist_ok=True)
-            f1.savefig(p1, dpi=200)
+            f1.savefig(p1, dpi=200, bbox_inches="tight")
             plt.close(f1)
-        if len(handles) > 1:
-            fig.legend(handles=handles, loc="upper right", fontsize=9, frameon=False)
-        fig.suptitle(f"{header} - dots: nuclei; large dots: replicate medians; bar: mean ± SD", fontsize=11)
-        fig.tight_layout(rect=(0, 0, 0.94 if len(handles) > 1 else 1, 1))
+        fig.suptitle(f"{header} - dots: nuclei, colored by replicate; large dots: replicate medians "
+                     "(area ∝ nuclei); black: mean ± SD of replicate medians", fontsize=11)
+        fig.tight_layout(rect=(0, 0, 1 - 1.1 / (width * ncol + 1.2), 1))
+        add_legend(fig, handles, loc="upper right", bbox_to_anchor=(1.0, 0.95))
         path = out_dir / f"{name}_overview.png"
-        fig.savefig(path, dpi=150)
+        fig.savefig(path, dpi=150, bbox_inches="tight")
         plt.close(fig)
         written.append(path)
     return written

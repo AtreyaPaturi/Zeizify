@@ -5,4 +5,4 @@ Z-stack per channel, write analysis-ready TIFFs grouped by antibody, and choose
 reference contrast ranges from control wells - from a desktop GUI or the CLI.
 """
 
-__version__ = "1.4.0"
+__version__ = "1.4.1"

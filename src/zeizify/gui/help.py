@@ -167,7 +167,8 @@ HELP: dict[str, dict] = {
                 "replicates; 'Field' treats fields as technical replicates and overstates certainty.",
                 "With one well per condition no p-values are possible; effect sizes (Cliff's delta on nuclei) "
                 "are still reported.",
-                "SuperPlots show every nucleus (small dots), replicate medians (large dots) and their mean ± SD. "
+                "SuperPlots show every nucleus (small dots, colored by replicate), each replicate's median (large "
+                "dot, area proportional to its number of nuclei) and the mean ± SD of the replicate medians. "
                 "All cell types (e.g. WT and KO) share each graph, side by side in their own color, and are also "
                 "compared directly within each treatment (stats_pairwise.csv, compare = cell_type).",
                 "Order: treatments run control first, then in plate-map order (e.g. MOCK, ML792, MG132, "

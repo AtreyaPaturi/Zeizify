@@ -3,6 +3,14 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.4.1] - 2026-10-15
+
+### Changed
+- SuperPlot style: nuclei as a beeswarm colored by replicate (Okabe-Ito colors), replicate medians as large
+  dots of the same color with area proportional to the number of nuclei, a boxed frame, a two-level x axis
+  (cell type under each column, treatment underlined beneath), and a legend with replicate colors and an
+  *n* size key. Without a Replicate column, replicates (wells) are numbered 1, 2, 3 within each condition.
+
 ## [1.4.0] - 2026-10-15
 
 ### Added
