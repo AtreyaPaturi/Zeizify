@@ -95,7 +95,58 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--overwrite-png", action="store_true")
 
     sub.add_parser("info", help="print CZI metadata summary").add_argument("czi", type=Path)
+
+    from .analysis.params import AnalysisParams
+
+    d = AnalysisParams()
+    a = sub.add_parser("analyze", help="per-nucleus spot and colocalization analysis of an extraction")
+    a.add_argument("out", type=Path, help="Zeizify output folder (with intensity_report.csv)")
+    a.add_argument("--analysis-dir", type=Path, help="where to write results (default OUT/analysis)")
+    a.add_argument("--nuclear", default="", help="nuclear channel (default: auto, DAPI/Hoechst)")
+    a.add_argument("--channels", default="", help="comma-separated spot channels (default: all non-nuclear)")
+    a.add_argument("--method", choices=["auto", "cellpose", "classical"], default=d.nucleus_method)
+    a.add_argument("--nucleus-diameter", type=float, default=d.nucleus_diameter_um, metavar="UM")
+    a.add_argument("--keep-border-nuclei", action="store_true")
+    a.add_argument("--cpu", action="store_true", help="run Cellpose on the CPU")
+    a.add_argument("--spot-diameter", type=float, nargs=2, default=[d.spot_min_diameter_um, d.spot_max_diameter_um],
+                   metavar=("MIN_UM", "MAX_UM"))
+    a.add_argument("--sensitivity", type=float, default=d.spot_sensitivity,
+                   help="spot noise floor in MADs (lower = more spots)")
+    a.add_argument("--no-declump", action="store_true")
+    a.add_argument("--dapi-qc", type=float, nargs=2, default=[d.qc_dapi_low, d.qc_dapi_high], metavar=("LOW", "HIGH"),
+                   help="flag nuclei whose mean DAPI is outside LOW..HIGH x the field median")
+    a.add_argument("--randomizations", type=int, default=d.coloc_randomizations,
+                   help="Costes significance randomizations per nucleus (0 = off)")
+    a.add_argument("--replicate-column", default="", help="plate-map column defining replicates (default: Replicate, else well)")
+    a.add_argument("--workers", type=int, default=d.workers)
+    a.add_argument("--no-qc", action="store_true", help="skip QC overlay images")
     return p
+
+
+def _analyze(args) -> int:
+    from .analysis.params import AnalysisParams
+    from .analysis.run import run_analysis
+
+    p = AnalysisParams(
+        nuclear_channel=args.nuclear, spot_channels=[c.strip() for c in args.channels.split(",") if c.strip()],
+        nucleus_method=args.method, nucleus_diameter_um=args.nucleus_diameter,
+        exclude_border_nuclei=not args.keep_border_nuclei, use_gpu=not args.cpu,
+        spot_min_diameter_um=args.spot_diameter[0], spot_max_diameter_um=args.spot_diameter[1],
+        spot_sensitivity=args.sensitivity, spot_declump=not args.no_declump,
+        qc_dapi_low=args.dapi_qc[0], qc_dapi_high=args.dapi_qc[1], coloc_randomizations=args.randomizations,
+        replicate_column=args.replicate_column, workers=args.workers, qc_overlays=not args.no_qc)
+    last = {"stage": None}
+
+    def progress(stage, done, total, item):
+        if stage != last["stage"]:
+            last["stage"] = stage
+            print(f"== {stage} ==")
+
+    res = run_analysis(args.out, p, args.analysis_dir, progress=progress)
+    for k, e in res.errors:
+        print(f"  error in {k}: {e}")
+    print(f"Results: {res.analysis_dir}")
+    return 1 if res.errors and not len(res.nuclei) else 0
 
 
 def main(argv: "list[str] | None" = None) -> int:
@@ -105,6 +156,9 @@ def main(argv: "list[str] | None" = None) -> int:
 
         gui_main()
         return 0
+
+    if args.cmd == "analyze":
+        return _analyze(args)
 
     from . import pipeline
 

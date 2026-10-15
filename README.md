@@ -44,6 +44,10 @@ control-referenced contrast ranges, configurable figure-style layout PNGs and a 
 - **Reproducibility.** Every run writes `run_manifest.json` (inputs, parameters, mapping source, software
   versions, contrast choices).
 - **GUI and CLI.** A modern desktop app (light/dark) for interactive work, and a scriptable CLI for batch runs.
+- **Zeizify Analyze.** Per-nucleus quantification of nuclear speckles / bodies and colocalization on the
+  extracted images: Cellpose or classical nuclei, per-nucleus spot detection, counts, sizes, dispersal,
+  Pearson / Manders–Costes / ICQ and object overlap, replicate-level statistics and SuperPlots. Runs in
+  parallel. See [Zeizify Analyze](#zeizify-analyze).
 
 ## Installation
 
@@ -63,6 +67,20 @@ pip install -e .                      # or, for the exact tested versions: pip i
 ```
 
 On Linux, tkinter may need to be installed separately (e.g. `sudo apt install python3-tk`).
+
+**Optional: Cellpose for nuclear segmentation (recommended for Zeizify Analyze).** Without it, a classical
+segmentation is used.
+
+```bash
+pip install cellpose
+# GPU (NVIDIA): installing cellpose pulls a CPU-only PyTorch from PyPI. Replace it with the CUDA build
+# matching your driver, e.g. CUDA 12.8 (RTX 50-series needs cu128 or newer):
+pip install --force-reinstall --no-deps torch torchvision --index-url https://download.pytorch.org/whl/cu128
+python -c "import torch; print(torch.cuda.is_available())"   # should print True
+```
+
+The Analyze page and log report whether Cellpose is running on the GPU. The GPU is roughly 10× faster than the
+CPU. The first Cellpose run downloads its model (~1.2 GB).
 
 ## Quick start (GUI)
 
@@ -165,11 +183,43 @@ out/
 `intensity_report.csv` is meant to be applied at view or analysis time (e.g. a Fiji macro or your own
 quantification). Zeizify never rescales or rewrites the extracted TIFFs.
 
+## Zeizify Analyze
+
+Quantify nuclear speckles / bodies and protein colocalization, nucleus by nucleus, on an extraction. Open the
+**Analyze** page, or press *Analyze* after an export, or use the CLI:
+
+```bash
+zeizify analyze out/                                  # defaults: Cellpose if installed, all channels
+zeizify analyze out/ --spot-diameter 0.3 2 --sensitivity 5 --randomizations 100 --replicate-column Replicate
+```
+
+1. **Nuclei** are segmented from DAPI with Cellpose (or classical threshold + watershed). Edge-touching
+   nuclei are removed, and condensed (mitotic / apoptotic), dim or saturated nuclei are flagged and left out of
+   statistics.
+2. **Spots** are detected inside each nucleus per channel: top-hat background removal, a per-nucleus threshold
+   with a noise floor, and a size window in µm.
+3. **Per nucleus**: spot count, size, shape and intensity, background-paired intensities, and threshold-free
+   dispersal (intensity CV, spot/nucleoplasm enrichment, fraction of signal in spots).
+4. **Colocalization** for every channel pair: Pearson, Spearman, Li ICQ, Manders tM1/tM2 with Costes
+   thresholds (Fiji Coloc 2 definitions), optional Costes significance, and object overlap / enrichment over
+   chance / nearest-neighbour distance. Single-stain wells are labelled as bleed-through controls.
+5. **Statistics** on replicate medians (SuperPlots): Welch ANOVA, Games-Howell, BH q-values, Hedges' g and
+   Cliff's delta, plus SuperPlot figures.
+
+Use **Preview** on the Analyze page to check segmentation on one field before the full run. Nuclear masks are
+cached, so re-tuning spot settings re-runs quickly. Results go to `out/analysis/`.
+
+**Replicates.** By default a replicate is a well. For p-values each treatment needs ≥ 2 replicates; add a
+`Replicate` column to the plate map for biological replicates. With one well per condition, effect sizes
+are reported but no tests.
+
+Full methods, the source each step follows, and validation are in [`docs/analysis.md`](docs/analysis.md).
+
 ## How it works
 
-See [`docs/methods.md`](docs/methods.md) for a methods-section-ready description, and
-[`docs/validation.md`](docs/validation.md) for how the implementation was cross-validated against existing
-CZI tooling.
+See [`docs/methods.md`](docs/methods.md) for a methods-section-ready description,
+[`docs/analysis.md`](docs/analysis.md) for the analysis methods, and [`docs/validation.md`](docs/validation.md)
+for how the implementation was cross-validated against existing tools.
 
 ## Limitations
 
@@ -178,8 +228,9 @@ CZI tooling.
 - Max-intensity projection discards Z by design.
 - Default layout colors are assigned by fluorophore name (DAPI/Hoechst → blue, 488/GFP → green,
   546–594/Cy3/RFP → red, 640–670/Cy5 → magenta, otherwise gray) and can be changed per run.
-- Layout merges are for visualization. Zeizify does not compute co-localization coefficients (e.g. Pearson's,
-  Manders'). Use the extracted TIFFs with your quantification tool of choice.
+- Layout merges are for visualization only. Colocalization coefficients are computed by Zeizify Analyze.
+- Zeizify Analyze works on 2-D maximum projections. Projection can create apparent overlap between objects at
+  different depths, so object-based colocalization is an upper bound compared with 3-D analysis.
 
 ## Project layout
 
@@ -194,6 +245,7 @@ src/zeizify/
 ├── pipeline.py       high-level steps + run manifest (shared by GUI and CLI)
 ├── plate.py          plate formats and plate map CSV
 ├── cli.py            command-line interface
+├── analysis/         Zeizify Analyze: segment, measure, coloc, stats, run (parallel)
 └── gui/              desktop app (customtkinter); help text lives in gui/help.py
 tests/                pytest suite with synthetic CZI fixtures
 docs/                 methods, validation, screenshots

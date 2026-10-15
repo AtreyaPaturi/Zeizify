@@ -452,7 +452,11 @@ class ContrastPage(ctk.CTkFrame):
             m.text(f"{report}\n{n} new layout PNG(s) under each panel's png/ folder.")
             from .run_page import open_path
 
-            ghost_button(m.actions(), "Open output folder", lambda: open_path(self.out), width=150).pack(side="left")
+            acts = m.actions()
+            ghost_button(acts, "Open output folder", lambda: open_path(self.out), width=150).pack(side="left")
+            primary_button(acts, "Analyze nuclei & colocalization  ➜",
+                           lambda: (self.app.pages["analyze"].load(self.out), self.app.show("analyze")),
+                           width=250).pack(side="left", padx=6)
             self.app.toast("Export stopped." if stopped else "Export complete.", kind="warning" if stopped else "success")
 
         def fail(exc):

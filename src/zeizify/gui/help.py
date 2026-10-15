@@ -119,6 +119,58 @@ HELP: dict[str, dict] = {
             ]),
         ],
     },
+    "analyze": {
+        "title": "Analyze",
+        "intro": "Per-nucleus quantification of speckles / nuclear bodies and colocalization, run on the TIFFs "
+                 "Zeizify extracted. Results go to <output folder>/analysis/.",
+        "sections": [
+            ("Quick start", [
+                "Choose the Zeizify output folder (it is filled in automatically after a run).",
+                "Tick the channels to analyse; every pair of ticked channels is tested for colocalization.",
+                "Pick a field under Preview and press Preview - check that nuclei and spots are outlined correctly.",
+                "Adjust settings until the preview looks right, then press Run analysis.",
+            ]),
+            ("Nuclei", [
+                "Cellpose (deep learning, recommended) segments touching and irregular nuclei well; Classical "
+                "(threshold + watershed) needs no extra install. Auto uses Cellpose when it is installed.",
+                "Set the typical nucleus diameter in µm - it sets the scale for both methods and the size window "
+                "(debris and clumps are rejected).",
+                "Nuclei touching the image edge are excluded (incomplete).",
+                "Nuclei much brighter in DAPI than the field median (condensed: mitotic / apoptotic) or dimmer "
+                "(out of focus, debris), or with saturated pixels, are flagged: red in the overlay, kept in "
+                "nuclei.csv with qc_pass = False, and left out of the statistics.",
+                "Nuclear masks are cached: changing only spot or colocalization settings re-runs in seconds.",
+            ]),
+            ("Speckles / nuclear bodies", [
+                "Spot diameter: the size window in µm. PML bodies are ~0.3-1 µm, nuclear speckles ~0.5-3 µm.",
+                "Noise floor: a spot must rise this many robust standard deviations (MADs) above the "
+                "background-subtracted nucleoplasm. Lower finds fainter spots but may split grainy nucleoplasm "
+                "into false spots; check the preview.",
+                "Split touching spots separates bodies that touch at an intensity dip.",
+                "Speckles are rarely truly absent - for 'dispersed vs speckled', also use the threshold-free "
+                "readouts: intensity CV in the nucleus and spot/nucleoplasm enrichment.",
+            ]),
+            ("Colocalization", [
+                "Pixel-based, inside each nucleus: Pearson's r, Spearman's ρ, Li's ICQ, and Manders tM1/tM2 with "
+                "Costes automatic thresholds (as in Fiji Coloc 2). Untresholded M1/M2 are near 1 inside a nucleus "
+                "and rarely informative.",
+                "Object-based: fraction of spots in one channel overlapping spots in the other, overlap relative to "
+                "chance (enrichment > 1 = more than random), and nearest-spot distances.",
+                "Costes randomizations > 0 adds a per-nucleus significance test (slower).",
+                "Wells stained with only one antibody are reported as single-stain controls - use them to check "
+                "bleed-through between channels.",
+            ]),
+            ("Statistics", [
+                "Each metric is summarised per replicate (median of its nuclei) and replicates are compared: "
+                "Welch ANOVA and Games-Howell post hoc, with Benjamini-Hochberg q-values (SuperPlots, Lord 2020).",
+                "A replicate is a well by default. Add a 'Replicate' column to the plate map for biological "
+                "replicates; 'Field' treats fields as technical replicates and overstates certainty.",
+                "With one well per condition no p-values are possible; effect sizes (Cliff's delta on nuclei) "
+                "are still reported.",
+                "SuperPlots show every nucleus (small dots), replicate medians (large dots) and their mean ± SD.",
+            ]),
+        ],
+    },
     "contrast": {
         "title": "Contrast",
         "intro": "Choose one reference field per antibody panel. Its brightness range is applied to every other "

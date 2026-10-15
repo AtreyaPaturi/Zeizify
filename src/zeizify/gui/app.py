@@ -17,6 +17,7 @@ import customtkinter as ctk
 
 from .. import __version__
 from . import theme as T
+from .analyze_page import AnalyzePage
 from .contrast_page import ContrastPage
 from .help import AboutDialog, HelpPanel
 from .plate_page import PlatePage
@@ -24,7 +25,7 @@ from .run_page import RunPage
 from .state import Settings
 from .widgets import Toast
 
-NAV = [("plate", "▦", "Plate map"), ("run", "➜", "Run"), ("contrast", "◐", "Contrast")]
+NAV = [("plate", "▦", "Plate map"), ("run", "➜", "Run"), ("contrast", "◐", "Contrast"), ("analyze", "▤", "Analyze")]
 
 
 class App(ctk.CTk):
@@ -68,7 +69,7 @@ class App(ctk.CTk):
         self.current = "plate"
         self.bind("<F1>", lambda e: self.toggle_help())
         self.pages = {"plate": PlatePage(self.stack, self), "run": RunPage(self.stack, self),
-                      "contrast": ContrastPage(self.stack, self)}
+                      "contrast": ContrastPage(self.stack, self), "analyze": AnalyzePage(self.stack, self)}
         self.toaster = Toast(self.main)
         self.show("run" if self.pages["plate"].state.n_labeled() else "plate")
 
@@ -153,6 +154,8 @@ class App(ctk.CTk):
                                           font=T.font(13, "bold" if k == key else "normal"))
         page = self.pages[key]
         page.pack(fill="both", expand=True)
+        if hasattr(page, "on_show"):
+            page.on_show()
         self.current = key
         if self.help_panel.winfo_ismapped():
             self.help_panel.show_page(key)

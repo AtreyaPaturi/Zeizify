@@ -3,6 +3,30 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.3.0] - 2026-10-15
+
+### Added
+- **Zeizify Analyze**, a per-nucleus quantification of nuclear bodies and colocalization that runs on the
+  extracted TIFFs (new *Analyze* page, `zeizify analyze`, `zeizify.analysis` package; methods in
+  `docs/analysis.md`).
+  - Nuclei: Cellpose (GPU) or classical Otsu + watershed segmentation, size window, border exclusion, and
+    QC flags for condensed (mitotic/apoptotic), dim and saturated nuclei. Masks are cached.
+  - Spots: per-nucleus white top-hat, a per-object threshold with a robust noise floor, declumping, and a µm
+    size window.
+  - Per-nucleus counts, sizes, shapes, background-paired intensities, and threshold-free dispersal (CV,
+    enrichment, fraction in spots).
+  - Colocalization: Pearson, Spearman, Li ICQ, Manders M1/M2 and Costes tM1/tM2 (Coloc 2 definitions), an
+    optional Costes significance test, and object overlap / enrichment / nearest-neighbour distances.
+    Single-stain controls are labelled.
+  - Statistics on replicate medians: Welch ANOVA, Games-Howell, BH q-values, Hedges' g, Cliff's delta, and
+    SuperPlots.
+  - Parallel measurement over CPU cores; a one-field Preview for tuning; a progress panel with Stop.
+- After *Apply & export*, an *Analyze* shortcut on the Run page.
+- `scikit-image` and `pandas` dependencies; optional extra `zeizify[cellpose]`.
+
+### Fixed
+- `python -m zeizify` is guarded for multiprocessing on Windows.
+
 ## [1.2.2] - 2026-10-15
 
 ### Added
