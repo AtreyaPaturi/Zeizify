@@ -10,9 +10,11 @@ choose the panels and each channel's pseudocolor; defaults are inferred from cha
 
 from __future__ import annotations
 
+import threading
 from collections import Counter, defaultdict
 from itertools import combinations
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 import tifffile
@@ -159,42 +161,66 @@ def generate_png_layouts(
     panels: "list[Panel] | None" = None,
     overwrite: bool = False,
     colors: "dict[str, str] | None" = None,
+    progress: "Callable[[int, int, str], None] | None" = None,
+    log: "Callable[[str], None] | None" = None,
+    cancel: "threading.Event | None" = None,
 ) -> int:
     """One PNG per field at OUT_DIR/<Antibody>/png/<Label>_<Well>_<Field>_layout.png.
     Panels a field lacks a channel for are skipped. Existing PNGs are kept unless overwrite=True
-    (e.g. after changing the contrast, panels or colors)."""
+    (e.g. after changing the contrast, panels or colors).
+
+    progress(done, total, name) is called after every field (written or kept), log(text) once per
+    field with what happened, and a set cancel event stops after the current field. Returns the
+    number of PNGs written."""
     rng = build_control_range(stats, control, custom)
     by_field: dict[tuple, dict[str, FieldStat]] = defaultdict(dict)
     for s in stats:
         by_field[(s.well, s.field, s.antibody, s.label)][s.channel_name] = s
 
+    total = len(by_field)
     written = 0
-    for (well, field, antibody, label), channels in by_field.items():
-        folder = out_dir / (slug(antibody) or "unassigned") / "png"
-        folder.mkdir(parents=True, exist_ok=True)
-        out_path = folder / f"{label}_{well}_{field}_layout.png"
-        if out_path.exists() and not overwrite:
-            continue
-
-        scaled = {}
-        for cname, s in channels.items():
-            lo, hi = rng.get((antibody, cname), (s.min, s.max))
-            scaled[cname] = scale_to_uint8(tifffile.imread(s.path), lo, hi)
-        stains = {c: s.stain for c, s in channels.items() if s.stain}
-
-        images = []
-        for spec in panels or default_panels(list(channels)):
-            if spec and all(c in scaled for c in spec):
-                img = Image.fromarray(compose_rgb(scaled, spec, colors))
-                _label_panel(img, panel_caption(spec, stains))
-                images.append(img)
-        if not images:
-            continue
-
-        pw, ph = images[0].size
-        canvas = Image.new("RGB", (pw * len(images) + LAYOUT_GAP_PX * (len(images) - 1), ph), LAYOUT_GAP_COLOR)
-        for k, img in enumerate(images):
-            canvas.paste(img, (k * (pw + LAYOUT_GAP_PX), 0))
-        canvas.save(out_path)
-        written += 1
+    for i, ((well, field, antibody, label), channels) in enumerate(by_field.items(), start=1):
+        if cancel is not None and cancel.is_set():
+            if log:
+                log(f"Stopped after {i - 1} of {total} fields - finished PNGs are kept.")
+            break
+        name = f"{label}_{well}_{field}_layout.png"
+        result = _write_layout(out_dir, well, field, antibody, label, channels, rng, panels, overwrite, colors)
+        written += result == "written"
+        if log:
+            log({"written": f"wrote   {name}", "kept": f"kept    {name} (already exists)",
+                 "empty": f"skipped {name} (none of the chosen panels apply)"}[result])
+        if progress:
+            progress(i, total, f"{well} {field} · {antibody}")
     return written
+
+
+def _write_layout(out_dir, well, field, antibody, label, channels, rng, panels, overwrite, colors) -> str:
+    """Write one field's layout PNG. Returns "written", "kept" (exists, no overwrite) or "empty"."""
+    folder = out_dir / (slug(antibody) or "unassigned") / "png"
+    folder.mkdir(parents=True, exist_ok=True)
+    out_path = folder / f"{label}_{well}_{field}_layout.png"
+    if out_path.exists() and not overwrite:
+        return "kept"
+
+    scaled = {}
+    for cname, s in channels.items():
+        lo, hi = rng.get((antibody, cname), (s.min, s.max))
+        scaled[cname] = scale_to_uint8(tifffile.imread(s.path), lo, hi)
+    stains = {c: s.stain for c, s in channels.items() if s.stain}
+
+    images = []
+    for spec in panels or default_panels(list(channels)):
+        if spec and all(c in scaled for c in spec):
+            img = Image.fromarray(compose_rgb(scaled, spec, colors))
+            _label_panel(img, panel_caption(spec, stains))
+            images.append(img)
+    if not images:
+        return "empty"
+
+    pw, ph = images[0].size
+    canvas = Image.new("RGB", (pw * len(images) + LAYOUT_GAP_PX * (len(images) - 1), ph), LAYOUT_GAP_COLOR)
+    for k, img in enumerate(images):
+        canvas.paste(img, (k * (pw + LAYOUT_GAP_PX), 0))
+    canvas.save(out_path)
+    return "written"

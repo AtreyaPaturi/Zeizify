@@ -8,6 +8,8 @@ Writes intensity_report.csv and the layout PNGs.
 
 from __future__ import annotations
 
+import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
@@ -213,6 +215,106 @@ class FigureLayoutCard(Card):
         return {c: m.get() for c, m in self.color_menus.items()}
 
 
+def _fmt_secs(sec: float) -> str:
+    sec = int(round(sec))
+    return f"{sec // 60}:{sec % 60:02d}" if sec >= 60 else f"{sec}s"
+
+
+class ExportPanel(Card):
+    """Live view of Apply & export: step, progress bar, current field, counts, time left, and a log."""
+
+    STEPS = ["Intensity report", "Layout PNGs", "Run manifest"]
+
+    def __init__(self, master, on_stop):
+        super().__init__(master)
+        head = ctk.CTkFrame(self, fg_color="transparent")
+        head.pack(fill="x", padx=18, pady=(14, 4))
+        self.title = ctk.CTkLabel(head, text="Exporting…", font=T.font(14, "bold"), text_color=T.TEXT)
+        self.title.pack(side="left")
+        self.step = ctk.CTkLabel(head, text="", font=T.font(10, "bold"), text_color=T.ACCENT, fg_color=T.ACCENT_SOFT,
+                                 corner_radius=8, height=20)
+        self.step.pack(side="left", padx=10, ipadx=4)
+        self.stop_btn = ghost_button(head, "Stop", on_stop, width=70, height=28)
+        self.stop_btn.pack(side="right")
+        self.timing = ctk.CTkLabel(head, text="", font=T.font(11), text_color=T.MUTED)
+        self.timing.pack(side="right", padx=10)
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(fill="x", padx=18, pady=(4, 2))
+        self.bar = ctk.CTkProgressBar(row, mode="determinate", progress_color=T.ACCENT, fg_color=T.SURFACE_ALT, height=8)
+        self.bar.pack(side="left", fill="x", expand=True)
+        self.bar.set(0)
+        self.pct = ctk.CTkLabel(row, text="0 %", width=48, font=T.font(12, "bold"), text_color=T.TEXT, anchor="e")
+        self.pct.pack(side="left", padx=(10, 0))
+
+        self.current = ctk.CTkLabel(self, text="", font=T.font(12), text_color=T.TEXT, anchor="w")
+        self.current.pack(fill="x", padx=18)
+        self.counts = ctk.CTkLabel(self, text="", font=T.font(11), text_color=T.MUTED, anchor="w")
+        self.counts.pack(fill="x", padx=18, pady=(0, 6))
+        self.log = ctk.CTkTextbox(self, height=130, font=T.mono(11), fg_color=T.SURFACE_ALT, border_width=0,
+                                  corner_radius=10, text_color=T.TEXT, wrap="none")
+        self.log.pack(fill="x", padx=18, pady=(0, 14))
+        self.log.configure(state="disabled")
+        self.n = {"written": 0, "kept": 0, "skipped": 0}
+        self.t0 = self.t_layout = time.monotonic()
+        self._tick()
+
+    def set_step(self, i: int) -> None:
+        self.step.configure(text=f"Step {i + 1} of {len(self.STEPS)} · {self.STEPS[i]}")
+        if i == 1:
+            self.t_layout = time.monotonic()
+        if i != 1:
+            self.bar.configure(mode="indeterminate")
+            self.bar.start()
+        else:
+            self.bar.stop()
+            self.bar.configure(mode="determinate")
+            self.bar.set(0)
+
+    def add_log(self, line: str) -> None:
+        for key in self.n:
+            if line.startswith(key if key != "written" else "wrote"):
+                self.n[key] += 1
+        self.log.configure(state="normal")
+        self.log.insert("end", line + "\n")
+        self.log.see("end")
+        self.log.configure(state="disabled")
+        if line.startswith("Writing intensity"):
+            self.set_step(0)
+        elif line.startswith("Writing layout"):
+            self.set_step(1)
+
+    def progress(self, done: int, total: int, name: str) -> None:
+        frac = done / max(total, 1)
+        self.bar.set(frac)
+        self.pct.configure(text=f"{frac * 100:.0f} %")
+        self.current.configure(text=f"{name}   ({done} / {total} fields)")
+        self.counts.configure(text=f"{self.n['written']} written  ·  {self.n['kept']} kept (already existed)  ·  "
+                                   f"{self.n['skipped']} skipped")
+        el = time.monotonic() - self.t_layout
+        self._eta = el / done * (total - done) if done else None
+
+    def _tick(self) -> None:
+        if not self.winfo_exists() or getattr(self, "_finished", False):
+            return
+        el = time.monotonic() - self.t0
+        eta = getattr(self, "_eta", None)
+        self.timing.configure(text=f"elapsed {_fmt_secs(el)}" + (f"  ·  about {_fmt_secs(eta)} left" if eta else ""))
+        self.after(500, self._tick)
+
+    def finish(self, title: str, kind: str) -> None:
+        self._finished = True
+        self.bar.stop()
+        self.bar.configure(mode="determinate")
+        if kind == "success":
+            self.bar.set(1)
+            self.pct.configure(text="100 %")
+        self.title.configure(text=title, text_color={"success": T.SUCCESS, "warning": T.WARNING, "error": T.DANGER}[kind])
+        self.step.pack_forget()
+        self.stop_btn.pack_forget()
+        self.timing.configure(text=f"took {_fmt_secs(time.monotonic() - self.t0)}")
+
+
 class ContrastPage(ctk.CTkFrame):
     title = "Contrast"
     subtitle = "Pick a reference field per antibody so wells are visually comparable"
@@ -268,12 +370,16 @@ class ContrastPage(ctk.CTkFrame):
         self.layout_card = FigureLayoutCard(self.body, channels, on_change=lambda: self.overwrite.select())
         self.layout_card.pack(fill="x", pady=(0, 12))
 
+        self.export_panel: "ExportPanel | None" = None
+        self.export_slot = ctk.CTkFrame(self.body, fg_color="transparent", height=1)
+        self.export_slot.pack(fill="x")
         bar = Card(self.body)
         bar.pack(fill="x", pady=(0, 8))
         self.status = ctk.CTkLabel(bar, text="Empty custom boxes follow the reference field. Raw TIFFs are never modified.",
-                                   font=T.font(11), text_color=T.MUTED, anchor="w")
+                                   font=T.font(11), text_color=T.MUTED, anchor="w", justify="left", wraplength=640)
         self.status.pack(side="left", padx=18, pady=14, fill="x", expand=True)
-        primary_button(bar, "Apply & export", self.apply, width=140).pack(side="right", padx=(6, 14), pady=12)
+        self.apply_btn = primary_button(bar, "Apply & export", self.apply, width=140)
+        self.apply_btn.pack(side="right", padx=(6, 14), pady=12)
         self.overwrite = ctk.CTkSwitch(bar, text="Regenerate existing PNGs", font=T.font(12), text_color=T.TEXT,
                                        progress_color=T.ACCENT)
         self.overwrite.pack(side="right", padx=6)
@@ -304,29 +410,55 @@ class ContrastPage(ctk.CTkFrame):
         if problems:
             self.status.configure(text="Fix before continuing: " + "; ".join(problems), text_color=T.DANGER)
             return
-        self.status.configure(text="Writing report and layout PNGs…", text_color=T.MUTED)
         run = self.app.pages["run"]
         overwrite = bool(self.overwrite.get())
         panels, colors = self.layout_card.panels(), self.layout_card.colors()
+        cancel = threading.Event()
+
+        if self.export_panel is not None:
+            self.export_panel.destroy()
+        panel = self.export_panel = ExportPanel(self.export_slot, on_stop=lambda: (
+            cancel.set(), panel.stop_btn.configure(text="Stopping…", state="disabled")))
+        panel.pack(fill="x", pady=(0, 12))
+        panel.set_step(0)
+        self.apply_btn.configure(state="disabled", text="Exporting…", fg_color=T.BORDER, text_color=T.MUTED)
+        self.status.configure(text="Exporting - progress is shown above. You can keep using the rest of the app.",
+                              text_color=T.MUTED)
+        self.after(50, lambda: self.body._parent_canvas.yview_moveto(1.0))
+
+        def log(line: str) -> None:
+            self.app.post(panel.add_log, line)
 
         def work():
-            res = pipeline.finalize(self.result, self.out, control, custom, overwrite_png=overwrite, log=lambda s: None,
-                                    panels=panels or [()], colors=colors)
+            res = pipeline.finalize(self.result, self.out, control, custom, overwrite_png=overwrite, log=log,
+                                    panels=panels or [()], colors=colors,
+                                    progress=lambda d, t, name: self.app.post(panel.progress, d, t, name),
+                                    cancel=cancel)
+            self.app.post(panel.set_step, 2)
             pipeline.write_manifest(self.out, Path(run.czi), Path(run.plate_map), run.plate, run.mapping,
                                     run.flip_rows, run.flip_cols, self.result, control, custom, panels, colors)
+            log("Wrote run_manifest.json.")
             return res
 
         def done(res):
             report, n = res
-            self.status.configure(text=f"Wrote {report.name} and {n} layout PNG(s).", text_color=T.SUCCESS)
-            m = run.message("Report and layouts exported", kind="success")
-            m.text(f"{report}\n{n} new layout PNG(s) under each antibody's png/ folder.")
+            self.apply_btn.configure(state="normal", text="Apply & export", fg_color=T.ACCENT, text_color=T.ON_ACCENT)
+            stopped = cancel.is_set()
+            panel.finish("Export stopped" if stopped else "Export complete", "warning" if stopped else "success")
+            self.status.configure(text=f"Wrote {report.name} and {n} layout PNG(s)" + (" before stopping." if stopped else "."),
+                                  text_color=T.WARNING if stopped else T.SUCCESS)
+            m = run.message("Export stopped" if stopped else "Report and layouts exported",
+                            kind="warning" if stopped else "success")
+            m.text(f"{report}\n{n} new layout PNG(s) under each panel's png/ folder.")
             from .run_page import open_path
 
             ghost_button(m.actions(), "Open output folder", lambda: open_path(self.out), width=150).pack(side="left")
-            self.app.toast("Export complete.", kind="success")
+            self.app.toast("Export stopped." if stopped else "Export complete.", kind="warning" if stopped else "success")
 
         def fail(exc):
+            self.apply_btn.configure(state="normal", text="Apply & export", fg_color=T.ACCENT, text_color=T.ON_ACCENT)
+            panel.finish("Export failed", "error")
+            panel.add_log(f"ERROR: {exc}")
             self.status.configure(text=f"Export failed: {exc}", text_color=T.DANGER)
 
         self.app.run_bg(work, done, fail)

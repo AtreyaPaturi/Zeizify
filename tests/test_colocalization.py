@@ -85,6 +85,29 @@ def test_extraction_tags_channels_and_groups_by_panel(tmp_path):
     assert img.size == (10, 8)  # exactly the one requested merge panel
 
 
+def test_layout_progress_log_and_cancel(tmp_path):
+    import threading
+
+    out = tmp_path / "out"
+    czi = FakeCzi(make_entries({0: (0, 0), 1: (0, 9000), 2: (9000, 0)}))
+    pm = load_plate_map(_coloc_map(tmp_path))
+    stats, _ = process_all(czi, pm, {"A1": [0], "A2": [1], "B1": [2]}, CH, {0: "P1", 1: "P1", 2: "P1"}, out,
+                           log=lambda s: None)
+    control = default_control_choice(stats)
+    ticks, lines = [], []
+    n = generate_png_layouts(stats, control, out, progress=lambda d, t, name: ticks.append((d, t)), log=lines.append)
+    assert n == 3 and ticks == [(1, 3), (2, 3), (3, 3)]
+    assert all(l.startswith("wrote") for l in lines)
+    lines.clear()
+    assert generate_png_layouts(stats, control, out, log=lines.append) == 0
+    assert all(l.startswith("kept") for l in lines)
+    stop = threading.Event()
+    stop.set()
+    lines.clear()
+    assert generate_png_layouts(stats, control, out, overwrite=True, log=lines.append, cancel=stop) == 0
+    assert lines[0].startswith("Stopped after 0 of 3")
+
+
 def test_candidate_panels_cover_all_combinations():
     c = candidate_panels(["AF488", "AF594", "AF647", "DAPI"])
     assert ("AF488", "AF594") in c and ("AF594", "AF647") in c and ("AF488", "AF594", "AF647", "DAPI") in c

@@ -154,6 +154,9 @@ HELP: dict[str, dict] = {
                 "The raw TIFFs are never changed. Apply the ranges in Fiji or your analysis from the report.",
             ]),
             ("Tips", [
+                "After Apply & export, a progress panel shows the current step (report, layout PNGs, manifest), "
+                "the field being written, counts, elapsed time and an estimate of the time left, plus a live log. "
+                "Stop finishes the current image and halts; images already written are kept.",
                 "Existing layout PNGs are kept on re-export. Turn on 'Regenerate existing PNGs' after changing "
                 "the contrast.",
                 "The plate overview at the top shows which wells belong to which panel.",

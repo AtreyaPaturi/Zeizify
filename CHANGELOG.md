@@ -3,6 +3,18 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.2.2] - 2026-10-15
+
+### Added
+- Export progress on the Contrast page. *Apply & export* opens a panel with the current step (intensity
+  report → layout PNGs → run manifest), a progress bar with percentage, the field being written, counts
+  (written / kept / skipped), elapsed time and an estimate of the time left, a live log, and a *Stop*
+  button. Failures are shown in the panel with the error.
+- `generate_png_layouts` / `pipeline.finalize` accept `progress`, `log` and `cancel` callbacks.
+
+### Fixed
+- The export creates the output folder if it is missing.
+
 ## [1.2.1] - 2026-10-15
 
 ### Fixed

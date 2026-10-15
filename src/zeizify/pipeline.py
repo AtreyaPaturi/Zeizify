@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from importlib import metadata as importlib_metadata
 from pathlib import Path
+from typing import Callable
 
 from . import __version__
 from .contrast import ControlChoice, CustomRanges, write_intensity_report
@@ -95,10 +96,16 @@ def extract(czi_path: Path, plate_map_path: Path, out_dir: Path, mapping: SceneW
 
 def finalize(result: RunResult, out_dir: Path, control: ControlChoice, custom: "CustomRanges | None" = None,
              overwrite_png: bool = False, log: Log = print, panels: "list[Panel] | None" = None,
-             colors: "dict[str, str] | None" = None) -> tuple[Path, int]:
+             colors: "dict[str, str] | None" = None, progress: "Callable[[int, int, str], None] | None" = None,
+             cancel: "threading.Event | None" = None) -> tuple[Path, int]:
+    """Write intensity_report.csv, then the layout PNGs. progress(done, total, name) follows the PNGs."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log("Writing intensity_report.csv…")
     report = write_intensity_report(result.stats, control, out_dir, custom)
+    log(f"Wrote {report.name} ({len(result.stats)} rows).")
+    log("Writing layout PNGs…")
     n = generate_png_layouts(result.stats, control, out_dir, custom, panels=panels, overwrite=overwrite_png,
-                             colors=colors)
+                             colors=colors, progress=progress, log=log, cancel=cancel)
     log(f"Wrote {report.name} and {n} layout PNG(s). Raw TIFFs were not modified.")
     return report, n
 
