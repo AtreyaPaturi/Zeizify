@@ -30,6 +30,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+from scipy import ndimage as ndi
 from scipy import stats
 from scipy.spatial import cKDTree
 
@@ -129,8 +130,14 @@ def object_coloc(la: np.ndarray, lb: np.ndarray, nucleus: np.ndarray, px_um: flo
     out = {"n_a": len(ids_a), "n_b": len(ids_b)}
     in_a, in_b = la > 0, lb > 0
     both = in_a & in_b
-    out["frac_a_overlap"] = float(len(np.unique(la[both])) / len(ids_a)) if len(ids_a) else float("nan")
-    out["frac_b_overlap"] = float(len(np.unique(lb[both])) / len(ids_b)) if len(ids_b) else float("nan")
+    out["n_a_overlap"] = int(len(np.unique(la[both])))  # A spots touching any B spot
+    out["n_b_overlap"] = int(len(np.unique(lb[both])))
+    # double-positive spots: connected A-or-B regions containing both, so one PML body overlapping two
+    # SUMO foci counts once
+    union, _ = ndi.label(in_a | in_b)
+    out["n_double"] = int(len(np.unique(union[both])))
+    out["frac_a_overlap"] = float(out["n_a_overlap"] / len(ids_a)) if len(ids_a) else float("nan")
+    out["frac_b_overlap"] = float(out["n_b_overlap"] / len(ids_b)) if len(ids_b) else float("nan")
     area_a, area_b, area_n = int(in_a.sum()), int(in_b.sum()), int(nucleus.sum())
     out["obj_m1"] = float(both.sum() / area_a) if area_a else float("nan")
     out["obj_m2"] = float(both.sum() / area_b) if area_b else float("nan")

@@ -105,6 +105,7 @@ def test_object_coloc_counts_shared_spots():
         oc = object_coloc(np.where(m, sa, 0), np.where(m, sb, 0), m, PX)
         assert oc["frac_a_overlap"] == pytest.approx(ns / na)
         assert oc["frac_b_overlap"] == pytest.approx(ns / nb)
+        assert oc["n_a_overlap"] == oc["n_b_overlap"] == oc["n_double"] == ns
         assert oc["enrich_a"] > 3  # shared spots overlap far more than chance
         assert oc["nn_ab_um"] < 0.5 or ns <= na / 2
 
@@ -241,3 +242,15 @@ def test_cell_types_compared_within_treatment_and_count_distribution():
     dist = spot_count_distribution(long)
     sums = dist.groupby(["cell_type", "treatment"])["fraction"].sum()
     assert np.allclose(sums, 1.0) and set(dist["n_nuclei"]) == {90}
+
+
+def test_double_positive_spot_counts_merge_touching_bodies():
+    la, lb = np.zeros((40, 40), int), np.zeros((40, 40), int)
+    la[5:15, 5:15] = 1  # one A body overlapped by two B foci -> 1 double-positive spot
+    lb[5:9, 5:9], lb[11:15, 11:15] = 1, 2
+    la[25:30, 25:30] = 2  # A and B overlapping once
+    lb[27:32, 27:32] = 3
+    la[2:4, 30:32] = 3  # A alone
+    lb[34:37, 2:5] = 4  # B alone
+    oc = object_coloc(la, lb, np.ones((40, 40), bool), 0.1)
+    assert (oc["n_a"], oc["n_b"], oc["n_a_overlap"], oc["n_b_overlap"], oc["n_double"]) == (3, 4, 2, 3, 2)

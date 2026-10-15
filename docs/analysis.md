@@ -88,7 +88,11 @@ Fiji's Coloc 2 (github.com/fiji/Colocalisation_Analysis):
   whose r ≥ the observed r.
 
 **Object-based**, after SpotitPy (*BMC Bioinformatics* 2022) and DiAna (Gilles et al., *Methods* 2017):
-- the fraction of A spots overlapping any B spot, and vice versa;
+- the number of A spots overlapping any B spot (`n_a_overlap`), and vice versa, with the corresponding
+  fractions;
+- the number of **double-positive spots** per nucleus (`n_double`): connected regions of A-or-B spot pixels
+  that contain both an A and a B spot (>= 1 shared pixel), so a body overlapping two foci of the other
+  channel counts once;
 - object Manders (overlapping area / spot area);
 - overlap relative to chance: obj_M1 divided by the fraction of the nucleus covered by B spots (> 1 means more
   overlap than random placement);
@@ -117,7 +121,8 @@ independent samples. Each metric is summarised per replicate (the median of its 
 With fewer than two replicates per treatment no test is performed and only effect sizes are reported.
 **Figures** (`superplots/`), per staining panel, with all cell types in the same graph (treatments on the x
 axis, cell types side by side, one color per cell type):
-- `<panel>_spots_per_nucleus.png`: for each channel, spots per nucleus as a SuperPlot, and the fraction of
+- `<panel>_spots_per_nucleus.png`: spots per nucleus for each channel, and double-positive spots per
+  nucleus for each channel pair, each as a SuperPlot and as the fraction of
   nuclei in each count class (0, then classes scaled to the 95th percentile of counts, e.g. 1-5, 6-10, 11-20,
   21-30, ≥ 31), pooled over replicates (`spot_count_distribution.csv`);
 - `<panel>_overview.png`, and one PNG per metric in `<panel>/`: nuclei as a beeswarm colored by replicate,

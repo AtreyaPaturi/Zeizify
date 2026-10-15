@@ -3,6 +3,15 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.5.0] - 2026-10-15
+
+### Added
+- Double-positive spots per nucleus for every channel pair (`n_double` in `colocalization.csv`): connected
+  spot regions containing spots of both channels, so a body overlapping two foci of the other channel
+  counts once. Also `n_a_overlap` / `n_b_overlap`, the number of each channel's spots overlapping the other.
+- `n_double` is summarised and tested like the other metrics, plotted in the overview, and added as a row
+  (SuperPlot + count distribution) to `<panel>_spots_per_nucleus.png`.
+
 ## [1.4.1] - 2026-10-15
 
 ### Changed

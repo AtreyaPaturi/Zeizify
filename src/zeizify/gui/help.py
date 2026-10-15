@@ -154,6 +154,8 @@ HELP: dict[str, dict] = {
                 "Pixel-based, inside each nucleus: Pearson's r, Spearman's ρ, Li's ICQ, and Manders tM1/tM2 with "
                 "Costes automatic thresholds (as in Fiji Coloc 2). Untresholded M1/M2 are near 1 inside a nucleus "
                 "and rarely informative.",
+                "Double-positive spots per nucleus: spots present in both channels (overlapping by at least one "
+                "pixel) - plotted in <panel>_spots_per_nucleus.png, column n_double in colocalization.csv.",
                 "Object-based: fraction of spots in one channel overlapping spots in the other, overlap relative to "
                 "chance (enrichment > 1 = more than random), and nearest-spot distances.",
                 "Costes randomizations > 0 adds a per-nucleus significance test (slower).",
