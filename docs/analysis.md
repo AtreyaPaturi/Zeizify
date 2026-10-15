@@ -111,10 +111,23 @@ independent samples. Each metric is summarised per replicate (the median of its 
   (github.com/Kimura-Lab/Kono-et-al.-2023).
 - **Benjamini-Hochberg** q-values across all omnibus tests of a run.
 - **Effect sizes**: Hedges' g on replicate medians, and Cliff's delta on nuclei (descriptive).
+- **Cell types** (e.g. WT vs KO) are compared within each staining panel and treatment, with the same
+  pairwise statistics (`compare = cell_type` in `stats_pairwise.csv`; wild type is the reference).
 
 With fewer than two replicates per treatment no test is performed and only effect sizes are reported.
-`superplots/` contains an overview figure per panel and cell type, plus one PNG per metric: nuclei as dots
-colored by replicate, replicate medians as large dots, and mean ± SD of the replicate medians.
+**Figures** (`superplots/`), per staining panel, with all cell types in the same graph (treatments on the x
+axis, cell types side by side, one color per cell type):
+- `<panel>_spots_per_nucleus.png`: for each channel, spots per nucleus as a SuperPlot, and the fraction of
+  nuclei in each count class (0, then classes scaled to the 95th percentile of counts, e.g. 1-5, 6-10, 11-20,
+  21-30, ≥ 31), pooled over replicates (`spot_count_distribution.csv`);
+- `<panel>_overview.png`, and one PNG per metric in `<panel>/`: nuclei as small dots, replicate medians as
+  large dots (one marker per replicate when a Replicate column defines biological replicates), and mean ± SD
+  of the replicate medians.
+
+**Order.** Treatments: controls (MOCK, DMSO, ...) first, then in plate-map order (the first well, row by row,
+in which each appears), so MOCK, ML792, MG132, ML792+MG132 laid out down a column plot in that order. Cell
+types: wild type (WT, parental, ...) first, then plate-map order. Both can be set explicitly
+(`treatment_order`, `cell_type_order`).
 
 ## Outputs (`<output folder>/analysis/`)
 
@@ -124,9 +137,10 @@ colored by replicate, replicate medians as large dots, and mean ± SD of the rep
 | `spots.csv` | one row per spot |
 | `colocalization.csv` | one row per nucleus × channel pair: pixel and object colocalization |
 | `fields.csv` | per field: nuclei counts, background, saturation |
+| `spot_count_distribution.csv` | fraction of nuclei per spot-count class, per channel, cell type and treatment |
 | `replicate_summary.csv`, `condition_summary.csv` | medians per replicate; mean ± SD of replicate medians per condition |
-| `stats_omnibus.csv`, `stats_pairwise.csv` | Welch ANOVA (+ BH q); Games-Howell, Hedges' g, Cliff's delta |
-| `superplots/` | SuperPlots |
+| `stats_omnibus.csv`, `stats_pairwise.csv` | Welch ANOVA (+ BH q); Games-Howell, Hedges' g, Cliff's delta (treatments within cell type, cell types within treatment) |
+| `superplots/` | spots-per-nucleus figure, SuperPlot overview and per-metric SuperPlots, per staining panel |
 | `qc/` | per-field overlay: nuclei (white = analysed, red = QC-flagged) and spots per channel |
 | `masks/` | cached nuclear label images |
 | `analysis_manifest.json` | parameters, software versions, timings |

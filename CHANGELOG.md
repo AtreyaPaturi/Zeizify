@@ -3,6 +3,24 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.4.0] - 2026-10-15
+
+### Added
+- All cell types (e.g. WT and KO) share each SuperPlot, side by side in their own color, one overview per
+  staining panel (`superplots/<panel>_overview.png`, per-metric PNGs in `superplots/<panel>/`).
+- Cell types are compared directly within each treatment: `stats_pairwise.csv` has new `compare`
+  (`treatment` / `cell_type`) and `treatment` columns.
+- `superplots/<panel>_spots_per_nucleus.png`: spots per nucleus for each channel, as a SuperPlot and as the
+  fraction of nuclei per count class (0, 1-5, 6-10, ...; classes scale to the data). The fractions are in
+  `spot_count_distribution.csv`.
+- Treatment and cell-type order: control / wild type first, then plate-map order (e.g. MOCK, ML792,
+  MG132, ML792+MG132). Override with *Treatment order* / *Cell-type order* on the Analyze page, or
+  `--treatment-order` / `--cell-type-order`.
+
+### Changed
+- Treatments were previously ordered control first, then alphabetically; per-cell-type SuperPlot files
+  (`<panel>_<cell type>_overview.png`) are replaced by one file per panel.
+
 ## [1.3.0] - 2026-10-15
 
 ### Added

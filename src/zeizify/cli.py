@@ -118,9 +118,17 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--randomizations", type=int, default=d.coloc_randomizations,
                    help="Costes significance randomizations per nucleus (0 = off)")
     a.add_argument("--replicate-column", default="", help="plate-map column defining replicates (default: Replicate, else well)")
+    a.add_argument("--treatment-order", default="", metavar="A,B,...",
+                   help="comma-separated treatment order in plots and tests (default: control, then plate-map order)")
+    a.add_argument("--cell-type-order", default="", metavar="A,B,...",
+                   help="comma-separated cell-type order (default: wild type, then plate-map order)")
     a.add_argument("--workers", type=int, default=d.workers)
     a.add_argument("--no-qc", action="store_true", help="skip QC overlay images")
     return p
+
+
+def _csv(text: str) -> list[str]:
+    return [t.strip() for t in text.split(",") if t.strip()]
 
 
 def _analyze(args) -> int:
@@ -128,13 +136,14 @@ def _analyze(args) -> int:
     from .analysis.run import run_analysis
 
     p = AnalysisParams(
-        nuclear_channel=args.nuclear, spot_channels=[c.strip() for c in args.channels.split(",") if c.strip()],
+        nuclear_channel=args.nuclear, spot_channels=_csv(args.channels),
         nucleus_method=args.method, nucleus_diameter_um=args.nucleus_diameter,
         exclude_border_nuclei=not args.keep_border_nuclei, use_gpu=not args.cpu,
         spot_min_diameter_um=args.spot_diameter[0], spot_max_diameter_um=args.spot_diameter[1],
         spot_sensitivity=args.sensitivity, spot_declump=not args.no_declump,
         qc_dapi_low=args.dapi_qc[0], qc_dapi_high=args.dapi_qc[1], coloc_randomizations=args.randomizations,
-        replicate_column=args.replicate_column, workers=args.workers, qc_overlays=not args.no_qc)
+        replicate_column=args.replicate_column, workers=args.workers, qc_overlays=not args.no_qc,
+        treatment_order=_csv(args.treatment_order), cell_type_order=_csv(args.cell_type_order))
     last = {"stage": None}
 
     def progress(stage, done, total, item):

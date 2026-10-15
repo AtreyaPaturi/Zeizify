@@ -221,7 +221,7 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
     t_stage = time.monotonic()
 
     # ---- stage 3: tables + statistics ----
-    from .stats import condition_summary, long_table, replicate_summary, run_tests, write_superplots
+    from .stats import condition_summary, default_orders, long_table, replicate_summary, run_tests, write_superplots
 
     prog("stats", 0, 1, "tables")
     nuclei = pd.DataFrame([n for r in results for n in r.nuclei])
@@ -239,15 +239,19 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
     long = long_table(nuclei, coloc, spot_channels) if len(nuclei) else pd.DataFrame()
     rep = replicate_summary(long) if len(long) else pd.DataFrame()
     cond = condition_summary(rep) if len(rep) else pd.DataFrame()
-    omni, pairs = run_tests(rep, long) if len(rep) else (pd.DataFrame(), pd.DataFrame())
+    orders = default_orders(long, params.treatment_order, params.cell_type_order) if len(long) else {}
+    if orders:
+        log("Order: treatments " + ", ".join(orders["treatment"]) + "; cell types "
+            + ", ".join(c or "-" for c in orders["cell_type"]))
+    omni, pairs = run_tests(rep, long, orders) if len(rep) else (pd.DataFrame(), pd.DataFrame())
     rep.to_csv(adir / "replicate_summary.csv", index=False)
     cond.to_csv(adir / "condition_summary.csv", index=False)
     omni.to_csv(adir / "stats_omnibus.csv", index=False)
     pairs.to_csv(adir / "stats_pairwise.csv", index=False)
     log("Wrote replicate_summary.csv, condition_summary.csv, stats_omnibus.csv, stats_pairwise.csv.")
     prog("stats", 0, 1, "SuperPlots")
-    plots = write_superplots(long, rep, omni, adir / "superplots") if len(rep) else []
-    log(f"Wrote {len(plots)} SuperPlot overview(s) under superplots/.")
+    plots = write_superplots(long, rep, omni, adir / "superplots", orders) if len(rep) else []
+    log(f"Wrote {len(plots)} summary figure(s) under superplots/ and spot_count_distribution.csv.")
     prog("stats", 1, 1, "done")
     timings["stats_s"] = round(time.monotonic() - t_stage, 1)
 

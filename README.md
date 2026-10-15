@@ -191,6 +191,7 @@ Quantify nuclear speckles / bodies and protein colocalization, nucleus by nucleu
 ```bash
 zeizify analyze out/                                  # defaults: Cellpose if installed, all channels
 zeizify analyze out/ --spot-diameter 0.3 2 --sensitivity 5 --randomizations 100 --replicate-column Replicate
+zeizify analyze out/ --treatment-order "MOCK,ML792,MG132,ML792+MG132" --cell-type-order "WT,KO1"
 ```
 
 1. **Nuclei** are segmented from DAPI with Cellpose (or classical threshold + watershed). Edge-touching
@@ -204,7 +205,11 @@ zeizify analyze out/ --spot-diameter 0.3 2 --sensitivity 5 --randomizations 100 
    thresholds (Fiji Coloc 2 definitions), optional Costes significance, and object overlap / enrichment over
    chance / nearest-neighbour distance. Single-stain wells are labelled as bleed-through controls.
 5. **Statistics** on replicate medians (SuperPlots): Welch ANOVA, Games-Howell, BH q-values, Hedges' g and
-   Cliff's delta, plus SuperPlot figures.
+   Cliff's delta. Treatments are compared within each cell type, and cell types (WT vs KO) within each
+   treatment.
+6. **Figures** per staining panel, with all cell types side by side in each graph: a spots-per-nucleus figure
+   (SuperPlot + fraction of nuclei per count class) and a SuperPlot overview. Treatments are ordered control
+   first, then as in the plate map; type an order on the Analyze page to change it.
 
 Use **Preview** on the Analyze page to check segmentation on one field before the full run. Nuclear masks are
 cached, so re-tuning spot settings re-runs quickly. Results go to `out/analysis/`.

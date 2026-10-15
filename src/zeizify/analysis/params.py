@@ -40,6 +40,8 @@ class AnalysisParams:
     workers: int = max(1, (os.cpu_count() or 2) - 2)
     qc_overlays: bool = True
     replicate_column: str = ""  # "" = plate-map "Replicate" column if present, else the well
+    treatment_order: list[str] = field(default_factory=list)  # [] = control first, then plate-map order
+    cell_type_order: list[str] = field(default_factory=list)  # [] = wild type first, then plate-map order
     seed: int = 0
 
     def to_dict(self) -> dict:

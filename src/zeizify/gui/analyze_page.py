@@ -20,6 +20,10 @@ REPLICATE_CHOICES = {"Auto (plate-map Replicate column, else well)": "", "Well":
                      "Field (technical - not independent)": "field"}
 
 
+def _csv(text: str) -> list[str]:
+    return [t.strip() for t in text.split(",") if t.strip()]
+
+
 def _entry(master, value, width=70) -> ctk.CTkEntry:
     e = ctk.CTkEntry(master, width=width, height=30, corner_radius=8, border_color=T.BORDER, fg_color=T.SURFACE_ALT,
                      font=T.font(12))
@@ -147,6 +151,12 @@ class AnalyzePage(ctk.CTkFrame):
                                      font=T.font(12), fg_color=T.SURFACE_ALT, button_color=T.SURFACE_ALT,
                                      button_hover_color=T.BORDER, text_color=T.TEXT, dropdown_font=T.font(12))
         self.rep.pack(side="left")
+        r = _row(c, "Treatment order", "comma-separated; blank = control first, then plate-map order")
+        self.t_order = _entry(r, "", 420)
+        self.t_order.pack(side="left")
+        r = _row(c, "Cell-type order", "comma-separated; blank = wild type first - all cell types share each graph")
+        self.ct_order = _entry(r, "", 420)
+        self.ct_order.pack(side="left")
         r = _row(c, "Parallel workers", "CPU processes for measurement")
         self.workers = _entry(r, d.workers)
         self.workers.pack(side="left")
@@ -243,7 +253,8 @@ class AnalyzePage(ctk.CTkFrame):
                 spot_min_diameter_um=float(self.smin.get()), spot_max_diameter_um=float(self.smax.get()),
                 spot_sensitivity=round(float(self.sens.get()), 1), spot_declump=bool(self.declump.get()),
                 coloc_randomizations=int(self.rand.get()), replicate_column=REPLICATE_CHOICES[self.rep.get()],
-                workers=max(1, int(self.workers.get())), qc_overlays=bool(self.qc.get()))
+                workers=max(1, int(self.workers.get())), qc_overlays=bool(self.qc.get()),
+                treatment_order=_csv(self.t_order.get()), cell_type_order=_csv(self.ct_order.get()))
         except ValueError as exc:
             self.app.toast(f"Check the settings: {exc}", kind="warning")
             return None

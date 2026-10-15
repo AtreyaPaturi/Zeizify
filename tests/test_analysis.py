@@ -170,6 +170,7 @@ def test_run_analysis_end_to_end(tmp_path):
                  "stats_omnibus", "stats_pairwise"):
         assert (adir / f"{name}.csv").exists()
     assert (adir / "analysis_manifest.json").exists() and res.overview_plots and res.overview_plots[0].exists()
+    assert res.overview_plots[0].name.endswith("_spots_per_nucleus.png") and (adir / "spot_count_distribution.csv").exists()
     nuclei = pd.read_csv(adir / "nuclei.csv")
     assert len(nuclei) == 8 * 9 and nuclei["qc_pass"].all()
     assert set(nuclei["AF488_stain"]) == {"X"}
@@ -203,3 +204,40 @@ def test_mitotic_like_nucleus_is_flagged(tmp_path):
     r = measure_field(ds.fields[0], nuc, "DAPI", ["AF488", "AF594"], P, PX)
     flagged = [n for n in r.nuclei if not n["qc_pass"]]
     assert len(flagged) == 1 and "bright DAPI" in flagged[0]["qc_reason"]
+
+
+def test_treatment_and_cell_type_order_follow_plate_map():
+    from zeizify.analysis.stats import default_orders
+
+    long = pd.DataFrame({"well": ["C2", "A2", "D2", "B2", "G2", "E2"],
+                         "treatment": ["MG132", "MOCK", "ML792+MG132", "ML792", "MG132", "MOCK"],
+                         "cell_type": ["WT", "WT", "WT", "WT", "KO1", "KO1"]})
+    o = default_orders(long)
+    assert o["treatment"] == ["MOCK", "ML792", "MG132", "ML792+MG132"]
+    assert o["cell_type"] == ["WT", "KO1"]
+    o = default_orders(long, treatments=["mg132"], cell_types=["KO1"])
+    assert o["treatment"][0] == "MG132" and o["cell_type"] == ["KO1", "WT"]
+
+
+def test_cell_types_compared_within_treatment_and_count_distribution():
+    from zeizify.analysis.stats import replicate_summary, run_tests, spot_count_distribution
+
+    rng = np.random.default_rng(1)
+    rows = []
+    for ct, shift in (("WT", 0), ("KO1", 5)):
+        for t in ("Mock", "Drug"):
+            for w in range(3):
+                well = f"{'A' if ct == 'WT' else 'E'}{w + 1}{t}"
+                for v in rng.poisson(10 + shift, 30):
+                    rows.append({"antibody": "X", "cell_type": ct, "treatment": t, "replicate": well, "well": well,
+                                 "metric": "spots_n", "metric_label": "spots per nucleus", "feature": "AF488",
+                                 "stain": "X", "value": float(v)})
+    long = pd.DataFrame(rows)
+    _, pairs = run_tests(replicate_summary(long), long)
+    ct_pairs = pairs[pairs["compare"] == "cell_type"]
+    assert set(ct_pairs["treatment"]) == {"Mock", "Drug"}
+    r = ct_pairs.iloc[0]
+    assert (r["group_a"], r["group_b"]) == ("WT", "KO1") and r["vs_control"] and r["gh_p"] < 0.01
+    dist = spot_count_distribution(long)
+    sums = dist.groupby(["cell_type", "treatment"])["fraction"].sum()
+    assert np.allclose(sums, 1.0) and set(dist["n_nuclei"]) == {90}
