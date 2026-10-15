@@ -147,6 +147,13 @@ HELP: dict[str, dict] = {
                 "background-subtracted nucleoplasm. Lower finds fainter spots but may split grainy nucleoplasm "
                 "into false spots; check the preview.",
                 "Split touching spots separates bodies that touch at an intensity dip.",
+                "Threshold per channel. Per nucleus (default) adapts to each cell's staining, but it always finds "
+                "the brightest bits of a nucleus - when a treatment dissolves the bodies (e.g. SUMO2/3 after "
+                "ML792) it calls grainy diffuse signal 'spots'. Fixed applies one brightness floor to every well: "
+                "automatic (split of all spots into dim grains vs bodies) or a value you type. Check "
+                "qc/spot_brightness.png: use Fixed only if the channel shows two separated humps (separability "
+                "> 0.7); keep Per nucleus for stains whose bodies persist (e.g. PML).",
+                "Preview with Fixed - automatic uses the floor from the last full run.",
                 "Speckles are rarely truly absent - for 'dispersed vs speckled', also use the threshold-free "
                 "readouts: intensity CV in the nucleus and spot/nucleoplasm enrichment.",
             ]),

@@ -192,13 +192,16 @@ Quantify nuclear speckles / bodies and protein colocalization, nucleus by nucleu
 zeizify analyze out/                                  # defaults: Cellpose if installed, all channels
 zeizify analyze out/ --spot-diameter 0.3 2 --sensitivity 5 --randomizations 100 --replicate-column Replicate
 zeizify analyze out/ --treatment-order "MOCK,ML792,MG132,ML792+MG132" --cell-type-order "WT,KO1"
+zeizify analyze out/ --fixed-threshold AF594        # one spot brightness floor for every well (automatic)
 ```
 
 1. **Nuclei** are segmented from DAPI with Cellpose (or classical threshold + watershed). Edge-touching
    nuclei are removed, and condensed (mitotic / apoptotic), dim or saturated nuclei are flagged and left out of
    statistics.
 2. **Spots** are detected inside each nucleus per channel: top-hat background removal, a per-nucleus threshold
-   with a noise floor, and a size window in µm.
+   with a noise floor, and a size window in µm. For a stain whose bodies disappear under a treatment (e.g.
+   SUMO2/3 after a SUMOylation inhibitor), set its threshold to *Fixed*: one brightness floor for every well,
+   so diffuse signal is not called spots. Check `qc/spot_brightness.png` first.
 3. **Per nucleus**: spot count, size, shape and intensity, background-paired intensities, and threshold-free
    dispersal (intensity CV, spot/nucleoplasm enrichment, fraction of signal in spots).
 4. **Colocalization** for every channel pair: Pearson, Spearman, Li ICQ, Manders tM1/tM2 with Costes

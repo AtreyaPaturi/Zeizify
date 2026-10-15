@@ -3,6 +3,22 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.6.0] - 2026-10-15
+
+### Added
+- Fixed (experiment-wide) spot threshold per channel: one brightness floor for every well, automatic
+  (Otsu on log spot brightness pooled over all wells) or a typed value. *Threshold* per channel on the
+  Analyze page; `--fixed-threshold CHANNEL[=VALUE]`; `spot_fixed_threshold` parameter. The floors used and
+  their separability are recorded in `analysis_manifest.json`.
+- `qc/spot_brightness.png`: spot brightness per treatment and cell type for every channel, with the floor
+  applied or suggested, and a warning in the log when a fixed floor is used on a channel without two
+  separated populations.
+
+### Fixed
+- The per-nucleus threshold alone called grainy diffuse signal "spots" when a treatment dissolves the bodies
+  (RPE1 SUMO2/3 after ML792: about 9-13 false spots per nucleus, about 5x dimmer than real SUMO2/3 bodies).
+  Use the fixed threshold for such stains. Defaults are unchanged.
+
 ## [1.5.0] - 2026-10-15
 
 ### Added

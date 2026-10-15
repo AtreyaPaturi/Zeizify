@@ -31,6 +31,12 @@ class AnalysisParams:
     spot_max_diameter_um: float = 3.0
     spot_sensitivity: float = 6.0  # noise floor: median + k * MAD of the top-hat nucleoplasm (lower = more spots)
     spot_declump: bool = True  # split touching spots at intensity saddles (watershed)
+    # Channels listed here use one brightness floor for every well instead of the per-nucleus threshold
+    # alone: spots whose mean top-hat intensity is below it are dropped. 0 = automatic (log-Otsu on the
+    # spot brightness pooled over all wells). Use for stains whose bodies disappear in some conditions
+    # (e.g. SUMO2/3 after a SUMOylation inhibitor), where a per-nucleus threshold calls grainy diffuse
+    # signal spots.
+    spot_fixed_threshold: dict[str, float] = field(default_factory=dict)
 
     # --- colocalization --------------------------------------------------------------------------
     coloc_randomizations: int = 0  # Costes block-scrambling significance test; 0 = off (e.g. 100)

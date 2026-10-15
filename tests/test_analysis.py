@@ -254,3 +254,28 @@ def test_double_positive_spot_counts_merge_touching_bodies():
     lb[34:37, 2:5] = 4  # B alone
     oc = object_coloc(la, lb, np.ones((40, 40), bool), 0.1)
     assert (oc["n_a"], oc["n_b"], oc["n_a_overlap"], oc["n_b_overlap"], oc["n_double"]) == (3, 4, 2, 3, 2)
+
+
+def test_fixed_spot_floor_drops_dim_spots():
+    from zeizify.analysis.segment import spot_brightness
+
+    dapi, a, b, truth = make_field(seed=5)
+    nuc = segment_nuclei(dapi, P, PX, "classical")
+    spots, th = detect_spots(a, nuc, P, PX)
+    bright = spot_brightness(spots, th)
+    floor = float(np.median(bright))
+    kept, th2 = detect_spots(a, nuc, P, PX, min_brightness=floor)
+    kb = spot_brightness(kept, th2)
+    assert 0 < len(kb) < len(bright) and (kb >= floor).all()
+    assert detect_spots(a, nuc, P, PX, min_brightness=1e12)[0].max() == 0
+
+
+def test_auto_spot_threshold_splits_two_populations_only():
+    from zeizify.analysis.segment import SEPARABILITY_MIN, auto_spot_threshold
+
+    rng = np.random.default_rng(0)
+    grains, bodies = 10 ** rng.normal(2.8, 0.1, 3000), 10 ** rng.normal(3.5, 0.1, 2000)
+    t, sep = auto_spot_threshold(np.concatenate([grains, bodies]))
+    assert 10 ** 2.95 < t < 10 ** 3.35 and sep > 0.85
+    _, sep1 = auto_spot_threshold(10 ** rng.normal(3.0, 0.2, 5000))
+    assert sep1 < SEPARABILITY_MIN

@@ -136,9 +136,11 @@ def segment_nuclei(dapi: np.ndarray, params: AnalysisParams, px_um: float, metho
     return segment_nuclei_classical(dapi, params, px_um)
 
 
-def detect_spots(img: np.ndarray, nuclei: np.ndarray, params: AnalysisParams, px_um: float) -> tuple[np.ndarray, np.ndarray]:
+def detect_spots(img: np.ndarray, nuclei: np.ndarray, params: AnalysisParams, px_um: float,
+                 min_brightness: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
     """Spot labels (unique across the field, 0 = background) and the white-top-hat image used to
-    find them (background-subtracted signal, zero outside nuclei)."""
+    find them (background-subtracted signal, zero outside nuclei). `min_brightness` > 0 also drops spots whose
+    mean top-hat intensity is below it (the fixed, experiment-wide threshold)."""
     min_d = params.spot_min_diameter_um / px_um
     max_d = params.spot_max_diameter_um / px_um
     radius = max(2, int(round(0.75 * max_d)))  # disk wider than the largest spot's radius
@@ -181,6 +183,9 @@ def detect_spots(img: np.ndarray, nuclei: np.ndarray, params: AnalysisParams, px
         areas = np.bincount(lab.ravel())
         keep = np.where((areas >= min_area) & (areas <= max_area))[0]
         keep = keep[keep > 0]
+        if min_brightness > 0 and len(keep):
+            sums = np.bincount(lab.ravel(), weights=th.ravel(), minlength=len(areas))
+            keep = keep[sums[keep] / areas[keep] >= min_brightness]
         if len(keep):
             lut = np.zeros(lab.max() + 1, dtype=np.int32)
             lut[keep] = np.arange(next_id, next_id + len(keep), dtype=np.int32)
@@ -190,3 +195,31 @@ def detect_spots(img: np.ndarray, nuclei: np.ndarray, params: AnalysisParams, px
             next_id += len(keep)
         tophat[R0:R1, C0:C1][inside] = th[inside]
     return spots, tophat
+
+
+def spot_brightness(spots: np.ndarray, tophat: np.ndarray) -> np.ndarray:
+    """Mean top-hat intensity of every spot in a label image."""
+    if spots.max() == 0:
+        return np.zeros(0)
+    area = np.bincount(spots.ravel())
+    total = np.bincount(spots.ravel(), weights=tophat.ravel())
+    ids = np.nonzero(area[1:])[0] + 1
+    return total[ids] / area[ids]
+
+
+SEPARABILITY_MIN = 0.7
+
+
+def auto_spot_threshold(brightness: np.ndarray) -> tuple[float, float]:
+    """Experiment-wide spot brightness floor: Otsu's threshold on log10 spot brightness pooled over all
+    wells, and Otsu's separability (between-class / total variance, 0-1). A single bell-shaped
+    population scores ~0.64 (2/pi for a normal distribution) and two distinct populations (dim grains vs
+    bodies) score higher; below SEPARABILITY_MIN a fixed floor should not be used."""
+    v = np.log10(brightness[brightness > 0])
+    if v.size < 10 or np.ptp(v) == 0:
+        return 0.0, float("nan")
+    t = float(filters.threshold_otsu(v))
+    lo, hi = v[v <= t], v[v > t]
+    w0, w1 = lo.size / v.size, hi.size / v.size
+    eta = float(w0 * w1 * (lo.mean() - hi.mean()) ** 2 / v.var()) if lo.size and hi.size else float("nan")
+    return float(10 ** t), eta

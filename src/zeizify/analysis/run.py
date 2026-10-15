@@ -36,7 +36,8 @@ from .. import __version__
 from .io import Dataset, FieldImages, load_dataset
 from .measure import FieldResult, measure_field
 from .params import AnalysisParams
-from .segment import resolve_method, segment_nuclei
+from .segment import (SEPARABILITY_MIN, auto_spot_threshold, detect_spots, resolve_method, segment_nuclei,
+                      spot_brightness)
 
 Log = Callable[[str], None]
 Progress = Callable[[str, int, int, str], None]  # (stage, done, total, item)
@@ -72,14 +73,45 @@ def _segment_task(fi: FieldImages, nuclear: str, params: AnalysisParams, px_um: 
     return fi.key
 
 
+def _brightness_task(fi: FieldImages, mask: Path, channels: list[str], params: AnalysisParams,
+                     px_um: float) -> dict[str, np.ndarray]:
+    """Mean top-hat brightness of the per-nucleus spot candidates in one field (for the automatic
+    experiment-wide floor)."""
+    import warnings
+
+    warnings.filterwarnings("ignore")
+    nuclei = tifffile.imread(mask).astype(np.int32)
+    out = {}
+    for c in channels:
+        if c in fi.channels:
+            out[c] = spot_brightness(*detect_spots(tifffile.imread(fi.channels[c]), nuclei, params, px_um))
+    return out
+
+
+def resolve_spot_floors(params: AnalysisParams, channels: list[str], candidates: dict) -> dict[str, dict]:
+    """Per fixed-threshold channel: {"floor", "mode", "separability"}; automatic floors come from the
+    pooled `candidates` (channel -> array of spot brightness)."""
+    out = {}
+    for c, v in params.spot_fixed_threshold.items():
+        if c not in channels:
+            continue
+        if v and v > 0:
+            out[c] = {"floor": float(v), "mode": "fixed (manual)", "separability": float("nan")}
+        else:
+            t, eta = auto_spot_threshold(np.asarray(candidates.get(c, []), dtype=float))
+            out[c] = {"floor": t, "mode": "fixed (automatic)", "separability": eta}
+    return out
+
+
 def _measure_task(fi: FieldImages, mask: Path, nuclear: str, spot_channels: list[str], params: AnalysisParams,
-                  px_um: float, bits: "int | None", qc_png: "Path | None") -> FieldResult:
+                  px_um: float, bits: "int | None", qc_png: "Path | None",
+                  floors: "dict[str, float] | None" = None) -> FieldResult:
     import warnings
 
     warnings.filterwarnings("ignore")
     try:
         nuclei = tifffile.imread(mask).astype(np.int32)
-        return measure_field(fi, nuclei, nuclear, spot_channels, params, px_um, bits, qc_png)
+        return measure_field(fi, nuclei, nuclear, spot_channels, params, px_um, bits, qc_png, floors)
     except Exception as exc:  # noqa: BLE001 - one bad field never aborts the run
         return FieldResult(fi.key, error=f"{exc}\n{traceback.format_exc(limit=3)}")
 
@@ -194,9 +226,43 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
     qc_dir = adir / "qc"
     results: list[FieldResult] = []
     ready = [f for f in todo if _mask_path(masks, f).exists()]
+
+    # experiment-wide spot floors: pool the per-nucleus spot candidates of every field first
+    auto = [c for c, v in params.spot_fixed_threshold.items() if c in spot_channels and not (v and v > 0)]
+    candidates: dict[str, list] = {c: [] for c in auto}
+    tagged: list[pd.DataFrame] = []  # the same, with treatment / cell type, for the check plot
+    if auto:
+        log(f"Fixed spot threshold (automatic) for {', '.join(auto)}: pooling spot brightness over all fields...")
+        with ProcessPoolExecutor(max_workers=params.workers) as ex:
+            futs = {ex.submit(_brightness_task, f, _mask_path(masks, f), auto, params, ds.px_um): f for f in ready}
+            for i, fut in enumerate(as_completed(futs), start=1):
+                f = futs[fut]
+                if stop.is_set():
+                    for x in futs:
+                        x.cancel()
+                try:
+                    for c, v in fut.result().items():
+                        candidates[c].append(v)
+                        tagged.append(pd.DataFrame({"channel": c, "well": f.well, "treatment": f.treatment or "",
+                                                    "cell_type": f.cell_type or "", "b": v}))
+                except Exception:  # noqa: BLE001 - the field's error is reported by the measure step
+                    pass
+                prog("measure", i, len(ready), "pooling spot brightness")
+        if stop.is_set():
+            raise InterruptedError("Stopped - nuclear masks are cached; run again to finish.")
+    candidates = {c: (np.concatenate(v) if v else np.zeros(0)) for c, v in candidates.items()}
+    spot_floors = resolve_spot_floors(params, spot_channels, candidates)
+    for c, d in spot_floors.items():
+        sep = f", separability {d['separability']:.2f}" if np.isfinite(d["separability"]) else ""
+        log(f"  {c}: spot brightness floor {d['floor']:.0f} ({d['mode']}{sep})")
+        if np.isfinite(d["separability"]) and d["separability"] < SEPARABILITY_MIN:
+            log(f"  WARNING {c}: spot brightness shows no clear dim/bright split - a fixed floor may remove real "
+                "spots; check qc/spot_brightness.png or use the per-nucleus threshold.")
+    floors = {c: d["floor"] for c, d in spot_floors.items()}
     with ProcessPoolExecutor(max_workers=params.workers) as ex:
         futs = {ex.submit(_measure_task, f, _mask_path(masks, f), nuclear, spot_channels, params, ds.px_um,
-                          ds.bit_ceiling, (qc_dir / f"{f.key}_qc.png") if params.qc_overlays else None): f for f in ready}
+                          ds.bit_ceiling, (qc_dir / f"{f.key}_qc.png") if params.qc_overlays else None,
+                          floors): f for f in ready}
         for i, fut in enumerate(as_completed(futs), start=1):
             f = futs[fut]
             if stop.is_set():
@@ -230,6 +296,14 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
     fields_df = pd.DataFrame([r.field_row for r in results])
     for df, name in ((nuclei, "nuclei"), (spots, "spots"), (coloc, "colocalization"), (fields_df, "fields")):
         df.to_csv(adir / f"{name}.csv", index=False)
+    try:
+        from .stats import write_spot_brightness_plot
+
+        write_spot_brightness_plot(spots, pd.concat(tagged, ignore_index=True) if tagged else None, spot_floors,
+                                   spot_channels, ds.px_um, qc_dir / "spot_brightness.png")
+        log("Wrote qc/spot_brightness.png (spot brightness per treatment, with any fixed floor).")
+    except Exception as exc:  # noqa: BLE001 - a diagnostic plot never fails the run
+        log(f"  spot brightness plot skipped: {exc}")
     log(f"Wrote nuclei.csv ({len(nuclei)}), spots.csv ({len(spots)}), colocalization.csv ({len(coloc)}).")
 
     for df in (nuclei, coloc):
@@ -260,7 +334,7 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
         "software": _versions(),
         "input": str(Path(out_dir)),
         "nuclear_channel": nuclear, "spot_channels": spot_channels, "pixel_size_um": ds.px_um,
-        "nucleus_method": method, "params": params.to_dict(),
+        "nucleus_method": method, "params": params.to_dict(), "spot_thresholds": spot_floors,
         "fields_analysed": len(results), "errors": [{"field": k, "error": e} for k, e in errors],
         "nuclei_total": int(len(nuclei)), "nuclei_qc_pass": int(nuclei["qc_pass"].sum()) if len(nuclei) else 0,
         "replicate_unit": replicate_unit(params, ds),
@@ -278,5 +352,11 @@ def preview_field(out_dir: "str | Path", key: str, params: AnalysisParams, png: 
     nuclear = params.nuclear_channel or ds.nuclear
     method = resolve_method(params)
     nuclei = segment_nuclei(tifffile.imread(fi.channels[nuclear]), params, ds.px_um, method)
-    return measure_field(fi, nuclei, nuclear, params.spot_channels or ds.signal_channels, params, ds.px_um,
-                         ds.bit_ceiling, png), method
+    channels = params.spot_channels or ds.signal_channels
+    floors = {c: float(v) for c, v in params.spot_fixed_threshold.items() if v and v > 0}
+    auto = [c for c, v in params.spot_fixed_threshold.items() if not (v and v > 0)]
+    if auto:  # an automatic floor needs every well: reuse the last full run's value
+        man = Path(out_dir) / "analysis" / "analysis_manifest.json"
+        last = json.loads(man.read_text(encoding="utf-8")).get("spot_thresholds", {}) if man.exists() else {}
+        floors.update({c: last[c]["floor"] for c in auto if c in last})
+    return measure_field(fi, nuclei, nuclear, channels, params, ds.px_um, ds.bit_ceiling, png, floors), method

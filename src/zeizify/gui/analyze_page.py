@@ -20,6 +20,9 @@ REPLICATE_CHOICES = {"Auto (plate-map Replicate column, else well)": "", "Well":
                      "Field (technical - not independent)": "field"}
 
 
+THRESHOLD_MODES = ["Per nucleus", "Fixed - automatic", "Fixed - value"]
+
+
 def _csv(text: str) -> list[str]:
     return [t.strip() for t in text.split(",") if t.strip()]
 
@@ -118,6 +121,9 @@ class AnalyzePage(ctk.CTkFrame):
                       "noise floor, size window").pack(fill="x", padx=18, pady=(14, 6))
         self.chan_row = _row(c, "Channels")
         self.chan_checks: dict[str, ctk.CTkCheckBox] = {}
+        self.thr_box = ctk.CTkFrame(c, fg_color="transparent")
+        self.thr_box.pack(fill="x")
+        self.thr_widgets: dict[str, tuple] = {}
         r = _row(c, "Spot diameter (µm)", "PML bodies ~0.3-1 µm · speckles ~0.5-3 µm")
         self.smin, self.smax = _entry(r, d.spot_min_diameter_um, 55), _entry(r, d.spot_max_diameter_um, 55)
         self.smin.pack(side="left")
@@ -231,6 +237,23 @@ class AnalyzePage(ctk.CTkFrame):
             cb.select()
             cb.pack(side="left", padx=(0, 14))
             self.chan_checks[ch] = cb
+        for w in self.thr_box.winfo_children():
+            w.destroy()
+        self.thr_widgets = {}
+        for ch in ds.signal_channels:
+            st = ", ".join(ds.stains_for(ch))
+            r = _row(self.thr_box, f"Threshold · {ch}" + (f" ({st})" if st else ""),
+                     "Fixed: one brightness floor for every well - for stains whose bodies vanish in some "
+                     "conditions" if ch == ds.signal_channels[0] else "")
+            menu = ctk.CTkOptionMenu(r, values=THRESHOLD_MODES, width=200, height=30, corner_radius=8, font=T.font(12),
+                                     fg_color=T.SURFACE_ALT, button_color=T.SURFACE_ALT, button_hover_color=T.BORDER,
+                                     text_color=T.TEXT, dropdown_font=T.font(12))
+            menu.set(THRESHOLD_MODES[0])
+            menu.pack(side="left")
+            val = _entry(r, "", 90)
+            val.pack(side="left", padx=8)
+            ctk.CTkLabel(r, text="value (Fixed - value only)", font=T.font(11), text_color=T.MUTED).pack(side="left")
+            self.thr_widgets[ch] = (menu, val)
         self.field_menu.configure(values=[f.key for f in ds.fields])
         self.field_menu.set(ds.fields[0].key if ds.fields else "")
 
@@ -254,10 +277,24 @@ class AnalyzePage(ctk.CTkFrame):
                 spot_sensitivity=round(float(self.sens.get()), 1), spot_declump=bool(self.declump.get()),
                 coloc_randomizations=int(self.rand.get()), replicate_column=REPLICATE_CHOICES[self.rep.get()],
                 workers=max(1, int(self.workers.get())), qc_overlays=bool(self.qc.get()),
-                treatment_order=_csv(self.t_order.get()), cell_type_order=_csv(self.ct_order.get()))
+                treatment_order=_csv(self.t_order.get()), cell_type_order=_csv(self.ct_order.get()),
+                spot_fixed_threshold=self._fixed_thresholds())
         except ValueError as exc:
             self.app.toast(f"Check the settings: {exc}", kind="warning")
             return None
+
+    def _fixed_thresholds(self) -> dict[str, float]:
+        out = {}
+        for ch, (menu, val) in self.thr_widgets.items():
+            mode = menu.get()
+            if mode == "Fixed - automatic":
+                out[ch] = 0.0
+            elif mode == "Fixed - value":
+                v = float(val.get())  # ValueError -> "Check the settings"
+                if v <= 0:
+                    raise ValueError(f"{ch}: the fixed threshold must be > 0")
+                out[ch] = v
+        return out
 
     def _ready(self) -> bool:
         if self.ds is None:

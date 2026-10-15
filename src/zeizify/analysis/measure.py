@@ -60,7 +60,7 @@ def _nan_mean(x) -> float:
 
 def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channels: list[str],
                   params: AnalysisParams, px_um: float, bit_ceiling: "int | None" = None,
-                  qc_png: "Path | None" = None) -> FieldResult:
+                  qc_png: "Path | None" = None, spot_floors: "dict[str, float] | None" = None) -> FieldResult:
     res = FieldResult(fi.key)
     ids = _ids(fi)
     imgs = {c: tifffile.imread(fi.channels[c]) for c in [nuclear, *spot_channels] if c in fi.channels}
@@ -80,7 +80,7 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
 
     spots, tophats = {}, {}
     for c in spot_channels:
-        spots[c], tophats[c] = detect_spots(imgs[c], nuclei, params, px_um)
+        spots[c], tophats[c] = detect_spots(imgs[c], nuclei, params, px_um, (spot_floors or {}).get(c, 0.0))
 
     # spot table + per-nucleus spot summaries
     spot_summary: dict[tuple[str, int], list[dict]] = {}

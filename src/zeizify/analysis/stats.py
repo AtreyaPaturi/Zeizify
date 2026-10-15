@@ -601,3 +601,68 @@ def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, 
         plt.close(fig)
         written.append(path)
     return written
+
+
+def write_spot_brightness_plot(spots: pd.DataFrame, candidates: "pd.DataFrame | None", floors: dict,
+                               channels: list[str], px_um: float, path) -> None:
+    """Per channel: distribution of spot brightness (mean top-hat intensity, log scale) per treatment and
+    cell type, with the fixed floor (solid) or, for per-nucleus channels, the floor an automatic fixed
+    threshold would use (dashed). Two separated humps = dim grains vs real bodies."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from .segment import SEPARABILITY_MIN, auto_spot_threshold
+
+    if not channels:
+        return
+    px2 = px_um * px_um
+    fig, axes = plt.subplots(1, len(channels), figsize=(6 * len(channels), 4.2), squeeze=False)
+    for ax, c in zip(axes[0], channels):
+        if candidates is not None and (candidates["channel"] == c).any():
+            by = candidates[candidates["channel"] == c]  # spots before the fixed floor
+        else:
+            d = spots[spots["channel"] == c] if len(spots) else spots
+            if not len(d):
+                ax.axis("off")
+                continue
+            by = d.assign(b=d["integrated_tophat"] / (d["area_um2"] / px2))
+        by = by[by["b"] > 0]
+        pooled = by["b"].to_numpy()
+        if not pooled.size:
+            ax.axis("off")
+            continue
+        bins = np.logspace(np.log10(pooled.min()), np.log10(pooled.max()), 50)
+        ax.hist(pooled, bins=bins, color="0.85", label="all spots")
+        styles = ["-", "--", ":", "-."]
+        for i, t in enumerate(level_order(by, "treatment", first=is_control)):
+            for j, ct in enumerate(level_order(by, "cell_type", first=is_wildtype)):
+                v = by.loc[(by["treatment"] == t) & (by["cell_type"] == ct), "b"].to_numpy()
+                if len(v):
+                    h, e = np.histogram(v, bins=bins)
+                    ax.step(e[:-1], h, where="post", color=REPLICATE_COLORS[i % len(REPLICATE_COLORS)],
+                            ls=styles[j % len(styles)], lw=1.2, label=f"{t}{' · ' + ct if ct else ''}")
+        if c in floors:
+            f, sep = floors[c]["floor"], floors[c]["separability"]
+            ax.axvline(f, color="black", lw=1.5, label=f"floor {f:.0f} ({floors[c]['mode']})")
+            note = f"spots below {f:.0f} are dropped in every well"
+        else:
+            f, sep = auto_spot_threshold(pooled)
+            if f:
+                ax.axvline(f, color="black", lw=1.2, ls="--", label=f"automatic floor would be {f:.0f} (not applied)")
+            note = ("per-nucleus threshold; one population - keep it" if not np.isfinite(sep) or sep < SEPARABILITY_MIN
+                    else "per-nucleus threshold; two populations - consider Fixed")
+        ax.set_xscale("log")
+        ax.set_xlabel("spot brightness (mean top-hat intensity)", fontsize=9)
+        ax.set_ylabel("spots", fontsize=9)
+        sep_txt = f" · separability {sep:.2f}" if np.isfinite(sep) else ""
+        ax.set_title(f"{c}: {note}{sep_txt}", fontsize=9)
+        ax.legend(fontsize=7, frameon=False)
+        _box(ax)
+    fig.suptitle("Spot brightness - two separated humps (dim grains vs bodies) support a fixed floor; one hump "
+                 f"(separability below {SEPARABILITY_MIN}) does not", fontsize=10)
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=130)
+    plt.close(fig)

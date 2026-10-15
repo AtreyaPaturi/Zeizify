@@ -49,7 +49,25 @@ For each nucleus and channel:
    36 SUMO "spots" in a nucleus with ~12 bodies); at *k* = 6 only discrete bodies remained, and PML counts
    were identical for *k* = 3–8.
 3. **Declumping** of touching spots by watershed on the top-hat image, seeded at local maxima (optional).
-4. **Size window** on area-equivalent diameter (default 0.25–3 µm).
+4. **Fixed (experiment-wide) floor**, optional per channel. A per-nucleus threshold always finds the brightest
+   part of a nucleus, so when a treatment dissolves the bodies it calls grainy diffuse signal spots. On RPE1
+   cells treated with the SUMO E1 inhibitor ML792, it found about 9-13 SUMO2/3 "spots" per nucleus. Their
+   mean top-hat intensity was about 600, against about 3,000-3,800 for SUMO2/3 bodies in untreated cells,
+   and their area of about 0.10 µm² was at the size limit. For such stains, spots whose mean top-hat
+   intensity is below one floor are dropped in every well, as with a global threshold in CellProfiler. The
+   floor is either typed in or automatic:
+   - the per-nucleus candidates of all fields are pooled first;
+   - Otsu's threshold on their log brightness gives the floor;
+   - Otsu's separability (between-class / total variance) is reported with it. A single bell-shaped
+     population scores about 0.64, so below 0.7 a warning is logged.
+
+   `qc/spot_brightness.png` shows every channel's spot brightness by treatment, with the floor applied or
+   suggested. On the RPE1 data:
+   - SUMO2/3: two populations (separability 0.80, floor 1,549). With the floor, SUMO2/3 spots per nucleus
+     were 0 after ML792, versus 7-9 in untreated cells.
+   - PML: one population (separability 0.62). PML bodies persist under ML792, so PML keeps the per-nucleus
+     threshold; an automatic floor there would have removed most untreated PML bodies.
+5. **Size window** on area-equivalent diameter (default 0.25–3 µm), applied before step 4.
 
 Each spot is assigned to its parent nucleus, the equivalent of CellProfiler's RelateObjects.
 

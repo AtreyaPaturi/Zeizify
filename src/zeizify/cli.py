@@ -113,6 +113,9 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--sensitivity", type=float, default=d.spot_sensitivity,
                    help="spot noise floor in MADs (lower = more spots)")
     a.add_argument("--no-declump", action="store_true")
+    a.add_argument("--fixed-threshold", action="append", default=[], metavar="CHANNEL[=VALUE]",
+                   help="one spot brightness floor for every well in CHANNEL (repeatable); VALUE in top-hat "
+                        "intensity, omitted = automatic. For stains whose bodies vanish in some conditions")
     a.add_argument("--dapi-qc", type=float, nargs=2, default=[d.qc_dapi_low, d.qc_dapi_high], metavar=("LOW", "HIGH"),
                    help="flag nuclei whose mean DAPI is outside LOW..HIGH x the field median")
     a.add_argument("--randomizations", type=int, default=d.coloc_randomizations,
@@ -131,6 +134,14 @@ def _csv(text: str) -> list[str]:
     return [t.strip() for t in text.split(",") if t.strip()]
 
 
+def _fixed(items: list[str]) -> dict[str, float]:
+    out = {}
+    for it in items:
+        ch, _, val = it.partition("=")
+        out[ch.strip()] = float(val) if val.strip() else 0.0
+    return out
+
+
 def _analyze(args) -> int:
     from .analysis.params import AnalysisParams
     from .analysis.run import run_analysis
@@ -143,7 +154,8 @@ def _analyze(args) -> int:
         spot_sensitivity=args.sensitivity, spot_declump=not args.no_declump,
         qc_dapi_low=args.dapi_qc[0], qc_dapi_high=args.dapi_qc[1], coloc_randomizations=args.randomizations,
         replicate_column=args.replicate_column, workers=args.workers, qc_overlays=not args.no_qc,
-        treatment_order=_csv(args.treatment_order), cell_type_order=_csv(args.cell_type_order))
+        treatment_order=_csv(args.treatment_order), cell_type_order=_csv(args.cell_type_order),
+        spot_fixed_threshold=_fixed(args.fixed_threshold))
     last = {"stage": None}
 
     def progress(stage, done, total, item):
