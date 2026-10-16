@@ -567,6 +567,27 @@ def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, 
             plt.close(fig)
             written.append(path)
 
+        # average spot size per nucleus (half maximum - independent of spot brightness), one panel per channel
+        m = "spot_mean_area_halfmax_um2"
+        feats = list(dict.fromkeys(lsub.loc[lsub["metric"] == m, "feature"]))
+        if feats:
+            fig, axes = plt.subplots(1, len(feats), figsize=((width + 1.4) * len(feats), 4.2), squeeze=False)
+            for ax, feat in zip(axes[0], feats):
+                ls = lsub[(lsub["metric"] == m) & (lsub["feature"] == feat)]
+                rs = rsub[(rsub["metric"] == m) & (rsub["feature"] == feat)]
+                st = ";".join(sorted(set(ls["stain"].astype(str)) - {""})) or feat
+                superplot(ax, ls, rs, f"{st} ({feat}): average spot area per nucleus",
+                          _p_text(omni, ab, m, feat, ct_order), t_order, ct_order)
+                ax.set_ylabel("mean spot area per nucleus (µm², at half max)", fontsize=9)
+                ax.set_ylim(bottom=0)
+            fig.suptitle(f"{header} - average spot area per nucleus (size at half of each spot's peak; "
+                         "nuclei without spots are not included)", fontsize=11)
+            fig.tight_layout()
+            path = out_dir / f"{name}_spot_area_per_nucleus.png"
+            fig.savefig(path, dpi=150, bbox_inches="tight")
+            plt.close(fig)
+            written.append(path)
+
         keys = list(lsub.groupby(["metric", "feature"], sort=False).groups)
         keys.sort(key=lambda k: ("×" in k[1], k[1], (SUPERPLOT_CHANNEL + SUPERPLOT_COLOC).index(k[0])))
         if not keys:

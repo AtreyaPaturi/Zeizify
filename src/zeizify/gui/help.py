@@ -182,6 +182,8 @@ HELP: dict[str, dict] = {
                 "compared directly within each treatment (stats_pairwise.csv, compare = cell_type).",
                 "Order: treatments run control first, then in plate-map order (e.g. MOCK, ML792, MG132, "
                 "ML792+MG132); cell types wild type first. Type an order to override it.",
+                "<panel>_spot_area_per_nucleus.png: average spot area per nucleus, measured at half of each spot's "
+                "peak so that brighter spots do not look bigger.",
                 "<panel>_spots_per_nucleus.png: spots per nucleus as a SuperPlot, plus the fraction of nuclei with "
                 "0, 1-2, 3-5, ... spots (spot_count_distribution.csv).",
             ]),

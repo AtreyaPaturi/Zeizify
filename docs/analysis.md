@@ -164,6 +164,8 @@ axis, cell types side by side, one color per cell type):
   nucleus for each channel pair, each as a SuperPlot and as the fraction of
   nuclei in each count class (0, then classes scaled to the 95th percentile of counts, e.g. 1-5, 6-10, 11-20,
   21-30, ≥ 31), pooled over replicates (`spot_count_distribution.csv`);
+- `<panel>_spot_area_per_nucleus.png`: for each channel, the average spot area per nucleus (size at half
+  maximum; nuclei without spots are not included);
 - `<panel>_overview.png`, and one PNG per metric in `<panel>/`: nuclei as a beeswarm colored by replicate,
   each replicate's median as a large dot of the same color with area proportional to its number of nuclei,
   and mean ± SD of the replicate medians in black. The x axis has two levels: cell type under each column,

@@ -171,6 +171,7 @@ def test_run_analysis_end_to_end(tmp_path):
                  "stats_omnibus", "stats_pairwise"):
         assert (adir / f"{name}.csv").exists()
     assert (adir / "analysis_manifest.json").exists() and res.overview_plots and res.overview_plots[0].exists()
+    assert res.overview_plots[1].name.endswith("_spot_area_per_nucleus.png") and res.overview_plots[1].exists()
     assert res.overview_plots[0].name.endswith("_spots_per_nucleus.png") and (adir / "spot_count_distribution.csv").exists()
     nuclei = pd.read_csv(adir / "nuclei.csv")
     assert len(nuclei) == 8 * 9 and nuclei["qc_pass"].all()

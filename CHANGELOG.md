@@ -3,6 +3,12 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.6.2] - 2026-10-16
+
+### Added
+- `superplots/<panel>_spot_area_per_nucleus.png`: average spot area per nucleus (size at half maximum), one
+  SuperPlot per channel, all cell types side by side. Nuclei without spots are not included.
+
 ## [1.6.1] - 2026-10-16
 
 ### Added
