@@ -223,3 +223,24 @@ def auto_spot_threshold(brightness: np.ndarray) -> tuple[float, float]:
     w0, w1 = lo.size / v.size, hi.size / v.size
     eta = float(w0 * w1 * (lo.mean() - hi.mean()) ** 2 / v.var()) if lo.size and hi.size else float("nan")
     return float(10 ** t), eta
+
+
+def halfmax_areas(spots: np.ndarray, tophat: np.ndarray, nuclei: np.ndarray, pad: int) -> dict[int, int]:
+    """Brightness-independent spot size: for each spot, the pixel count of the connected region around its
+    peak where the top-hat signal is >= half the spot's own peak (the area at half maximum), not crossing
+    into other spots or out of the nucleus. The thresholded area grows with brightness (the outline sits
+    where the signal crosses the nucleus threshold, a lower fraction of a brighter spot's peak); the
+    half-maximum area does not."""
+    out = {}
+    for i, sl in enumerate(ndi.find_objects(spots), start=1):
+        if sl is None:
+            continue
+        sl2 = tuple(slice(max(0, s.start - pad), s.stop + pad) for s in sl)
+        lab, th = spots[sl2], tophat[sl2]
+        own = lab == i
+        vals = np.where(own, th, -np.inf)
+        pk = np.unravel_index(np.argmax(vals), th.shape)
+        allowed = (th >= 0.5 * th[pk]) & ((lab == 0) | own) & (nuclei[sl2] > 0)
+        comp, _ = ndi.label(allowed)
+        out[i] = int((comp == comp[pk]).sum()) if comp[pk] else int(own.sum())
+    return out

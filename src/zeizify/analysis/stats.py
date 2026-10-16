@@ -31,7 +31,8 @@ NUCLEUS_METRICS = {"area_um2": "nuclear area (µm²)", "dapi_integrated": "integ
 CHANNEL_METRICS = {
     "spots_n": "spots per nucleus",
     "spots_area_frac": "nuclear area in spots (fraction)",
-    "spot_mean_area_um2": "mean spot area (µm²)",
+    "spot_mean_area_um2": "mean spot area, thresholded (µm²)",
+    "spot_mean_area_halfmax_um2": "mean spot size at half max (µm²)",
     "spot_mean_ecc": "mean spot eccentricity",
     "cv": "intensity CV in nucleus (dispersal)",
     "enrichment": "spot / nucleoplasm intensity",
@@ -52,7 +53,7 @@ COLOC_METRICS = {
     "enrich_a": "A-in-B overlap vs chance",
     "nn_ab_um": "A→B nearest spot (µm)",
 }
-SUPERPLOT_CHANNEL = ["spots_n", "spots_area_frac", "cv", "enrichment"]
+SUPERPLOT_CHANNEL = ["spots_n", "spot_mean_area_halfmax_um2", "spots_area_frac", "cv", "enrichment"]
 SUPERPLOT_COLOC = ["n_double", "pearson", "tm1", "tm2", "frac_a_overlap"]
 WILDTYPE_KEYWORDS = ("wt", "wildtype", "wild", "parental", "control", "ctrl")
 REPLICATE_COLORS = ["#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#0072B2", "#D55E00", "#F0E442", "#999999"]  # Okabe-Ito

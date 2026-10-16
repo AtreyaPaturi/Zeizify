@@ -74,7 +74,28 @@ Each spot is assigned to its parent nucleus, the equivalent of CellProfiler's Re
 ## 3. Measurements
 
 **Per spot** (`spots.csv`): area, equivalent diameter, eccentricity, solidity, mean / max / integrated
-intensity, integrated top-hat intensity, centroid.
+intensity, integrated top-hat intensity, centroid, and the **size at half maximum** (`area_halfmax_um2`,
+`diam_halfmax_um`).
+
+**Spot size: use the half-maximum size to compare conditions.** The thresholded area depends on
+brightness:
+- a spot's outline sits where its signal crosses the nucleus threshold;
+- that threshold is a smaller fraction of a brighter spot's peak, so the brighter spot gets the larger
+  outline.
+
+For spots at or near the resolution limit, as most PML bodies are, the thresholded area therefore partly
+measures brightness. The half-maximum size does not depend on brightness. It is the area of the connected
+region around the spot's peak where the top-hat signal is ≥ half that peak, without crossing into
+neighbouring spots.
+
+On RPE1 PML:
+- thresholded area correlated with spot brightness (Spearman 0.63) and rose from 0.10 to 1.0 µm² from
+  the dimmest to the brightest spots;
+- untreated KO1 PML bodies, about 40 % brighter than WT, had a 12 % larger thresholded area, but an
+  identical half-maximum size (0.231 µm² both).
+
+Below about twice the resolution limit, the half-maximum size approaches the size of the microscope's
+point-spread function rather than the body's physical size.
 
 **Per nucleus** (`nuclei.csv`): area, eccentricity, solidity, mean and integrated DAPI. Then, per channel:
 - **Intensity:** mean, median and integrated intensity. Background (`bg`) is the 10th percentile of pixels

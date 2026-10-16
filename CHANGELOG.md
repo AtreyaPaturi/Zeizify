@@ -3,6 +3,18 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.6.1] - 2026-10-16
+
+### Added
+- Brightness-independent spot size: area and diameter at half of each spot's own peak (`area_halfmax_um2`,
+  `diam_halfmax_um` in `spots.csv`; `<ch>_spot_mean_area_halfmax_um2` per nucleus), summarised, tested and
+  plotted in the overview.
+
+### Changed
+- The thresholded spot area is labelled "thresholded"; it grows with spot brightness (RPE1 PML: Spearman
+  0.63 with brightness). Untreated KO1 PML bodies, about 40 % brighter than WT, measured 12 % larger by
+  thresholded area but identical at half maximum. Compare sizes with the half-maximum measure.
+
 ## [1.6.0] - 2026-10-15
 
 ### Added

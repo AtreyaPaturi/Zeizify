@@ -270,6 +270,21 @@ def test_fixed_spot_floor_drops_dim_spots():
     assert detect_spots(a, nuc, P, PX, min_brightness=1e12)[0].max() == 0
 
 
+def test_halfmax_size_is_independent_of_brightness():
+    from zeizify.analysis.segment import halfmax_areas
+
+    yy, xx = np.mgrid[:60, :60]
+    blob = np.exp(-((yy - 30) ** 2 + (xx - 30) ** 2) / (2 * 3.0 ** 2))
+    nuc = np.ones((60, 60), int)
+    sizes = {}
+    for amp in (1.0, 4.0):
+        th = amp * blob
+        lab = (th > 0.2).astype(int)  # the same absolute threshold: a brighter spot gets a bigger outline
+        sizes[amp] = (int(lab.sum()), halfmax_areas(lab, th, nuc, 10)[1])
+    assert sizes[4.0][0] > 1.5 * sizes[1.0][0]
+    assert sizes[4.0][1] == sizes[1.0][1] == pytest.approx(2 * np.log(2) * np.pi * 9, rel=0.1)
+
+
 def test_auto_spot_threshold_splits_two_populations_only():
     from zeizify.analysis.segment import SEPARABILITY_MIN, auto_spot_threshold
 

@@ -13,6 +13,8 @@ Per nucleus and channel (prefix "<channel>_"):
   enrichment                   mean (bg-subtracted) intensity in spots / in the rest of the nucleus
   frac_in_spots                fraction of the nuclear (bg-subtracted) signal that lies in spots
   spots_n, spots_area_um2, spots_area_frac, spot_mean_area_um2, spot_mean_diam_um,
+  spot_mean_area_halfmax_um2, spot_mean_diam_halfmax_um  (spot size at half of its own peak - independent of
+                               brightness, unlike the thresholded area; use it to compare sizes),
   spot_mean_ecc, spot_mean_solidity, spot_mean_intensity
                                spot counts, sizes and shapes (Alexander 2024; Aktas lab 2026)
 
@@ -23,6 +25,7 @@ stay in the tables and are excluded from the statistics.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from itertools import combinations
 from pathlib import Path
@@ -35,7 +38,7 @@ from skimage import measure, morphology
 from .coloc import costes_pvalue, object_coloc, pixel_coloc
 from .io import FieldImages
 from .params import AnalysisParams
-from .segment import detect_spots
+from .segment import detect_spots, halfmax_areas
 
 
 @dataclass
@@ -90,11 +93,14 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
             continue
         parent = ndi.maximum(nuclei, lab, index=np.arange(1, lab.max() + 1))
         th = tophats[c]
+        hm = halfmax_areas(lab, th, nuclei, int(params.spot_max_diameter_um / px_um / 2) + 2)
         for sp in measure.regionprops(lab, intensity_image=imgs[c]):
             nid = int(parent[sp.label - 1])
             coords = sp.coords
             row = {**ids, "channel": c, "stain": fi.stains.get(c, ""), "spot_id": sp.label, "nucleus_id": nid,
                    "area_um2": sp.area * px2, "eq_diam_um": sp.equivalent_diameter_area * px_um,
+                   "area_halfmax_um2": hm.get(sp.label, sp.area) * px2,
+                   "diam_halfmax_um": 2 * math.sqrt(hm.get(sp.label, sp.area) / math.pi) * px_um,
                    "eccentricity": sp.eccentricity, "solidity": sp.solidity,
                    "mean_intensity": float(sp.intensity_mean), "max_intensity": float(sp.intensity_max),
                    "integrated_intensity": float(sp.intensity_mean * sp.area),
@@ -148,6 +154,8 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
                 f"{c}_spots_area_frac": float(in_spot.mean()),
                 f"{c}_spot_mean_area_um2": _nan_mean([x["area_um2"] for x in rows]),
                 f"{c}_spot_mean_diam_um": _nan_mean([x["eq_diam_um"] for x in rows]),
+                f"{c}_spot_mean_area_halfmax_um2": _nan_mean([x["area_halfmax_um2"] for x in rows]),
+                f"{c}_spot_mean_diam_halfmax_um": _nan_mean([x["diam_halfmax_um"] for x in rows]),
                 f"{c}_spot_mean_ecc": _nan_mean([x["eccentricity"] for x in rows]),
                 f"{c}_spot_mean_solidity": _nan_mean([x["solidity"] for x in rows]),
                 f"{c}_spot_mean_intensity": _nan_mean([x["mean_intensity"] for x in rows]),
