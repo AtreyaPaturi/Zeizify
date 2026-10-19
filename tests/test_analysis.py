@@ -173,7 +173,9 @@ def test_run_analysis_end_to_end(tmp_path):
         assert (adir / f"{name}.csv").exists()
     assert (adir / "analysis_manifest.json").exists() and res.overview_plots and res.overview_plots[0].exists()
     assert res.overview_plots[1].name.endswith("_single_double_positive.png") and res.overview_plots[1].exists()
-    assert res.overview_plots[2].name.endswith("_spot_area_per_nucleus.png") and res.overview_plots[2].exists()
+    assert res.overview_plots[2].name.endswith("_spot_categories.png") and res.overview_plots[2].exists()
+    assert res.overview_plots[3].name.endswith("_spot_area_per_nucleus.png") and res.overview_plots[3].exists()
+    assert (adir / "spot_categories.csv").exists()
     assert res.overview_plots[0].name.endswith("_spots_per_nucleus.png") and (adir / "spot_count_distribution.csv").exists()
     nuclei = pd.read_csv(adir / "nuclei.csv")
     assert len(nuclei) == 8 * 9 and nuclei["qc_pass"].all()
@@ -306,3 +308,24 @@ def test_auto_spot_threshold_splits_two_populations_only():
     assert 10 ** 2.95 < t < 10 ** 3.35 and sep > 0.85
     _, sep1 = auto_spot_threshold(10 ** rng.normal(3.0, 0.2, 5000))
     assert sep1 < SEPARABILITY_MIN
+
+
+def test_spot_category_table_shares_and_errors():
+    from zeizify.analysis.stats import spot_category_table
+
+    rows = []
+    for rep_ in ("W1", "W2"):
+        for m, vals in (("n_double", [4, 6]), ("n_a_only", [1, 3]), ("n_b_only", [0, 0])):
+            for v in vals:
+                rows.append({"antibody": "P", "cell_type": "WT", "treatment": "Mock", "replicate": rep_, "well": rep_,
+                             "metric": m, "metric_label": m, "feature": "AF488×AF594", "stain": "PML×SUMO",
+                             "value": float(v)})
+    tab = spot_category_table(pd.DataFrame(rows)).set_index("category")
+    assert tab.loc["n_double", "mean_per_nucleus"] == 5 and tab.loc["n_a_only", "mean_per_nucleus"] == 2
+    assert tab.loc["n_double", "fraction_of_spots"] == pytest.approx(10 / 14)
+    assert tab["fraction_of_spots"].sum() == pytest.approx(1.0)
+    assert set(tab["error_type"]) == {"SD of replicate means"} and tab.loc["n_double", "error"] == 0
+    assert tab.loc["n_a_only", "category_label"] == "PML only"
+    one = spot_category_table(pd.DataFrame([r for r in rows if r["replicate"] == "W1"])).set_index("category")
+    assert set(one["error_type"]) == {"SEM over nuclei"}
+    assert one.loc["n_double", "error"] == pytest.approx(np.std([4, 6], ddof=1) / np.sqrt(2))

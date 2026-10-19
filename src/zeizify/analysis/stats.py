@@ -527,6 +527,117 @@ def _count_bars(ax, dist: pd.DataFrame, t_order: list, ct_order: list, title: st
               loc="upper left")
 
 
+CATEGORY_METRICS = ["n_double", "n_a_only", "n_b_only"]
+CATEGORY_COLORS = {"n_double": "#4D4D4D", "n_a_only": "#009E73", "n_b_only": "#CC79A7"}
+
+
+def spot_category_table(long: pd.DataFrame) -> pd.DataFrame:
+    """Per staining panel, channel pair, cell type, treatment and spot category (double-positive, A only,
+    B only): mean spots per nucleus with an error, and the share of all spots (100 % stacked bars).
+    Means and shares are computed per replicate and averaged over replicates. The error is the SD of the
+    replicate means when every condition of the pair has >= 2 replicates, otherwise the SEM over nuclei
+    (one replicate per condition: a within-well error, not a replicate-level one)."""
+    cols = ["antibody", "feature", "stain", "cell_type", "treatment", "category", "category_label",
+            "mean_per_nucleus", "error", "error_type", "n_replicates", "n_nuclei", "spots", "fraction_of_spots"]
+    d = long[long["metric"].isin(CATEGORY_METRICS)].dropna(subset=["value"]) if len(long) else long
+    rows = []
+    for (ab, feat), sub in d.groupby(["antibody", "feature"], dropna=False):
+        stains = sorted(set(sub["stain"].astype(str)) - {"", "×"})
+        st = stains[0] if len(stains) == 1 else ""
+        a, b = (st.split("×") + ["", ""])[:2] if st else feat.split("×")
+        labels = {"n_double": f"{a} + {b} (double-positive)", "n_a_only": f"{a} only", "n_b_only": f"{b} only"}
+        reps = sub.groupby(["cell_type", "treatment", "replicate", "metric"])["value"].agg(["mean", "sum", "count"])
+        n_rep = sub.groupby(["cell_type", "treatment"])["replicate"].nunique()
+        replicate_sd = bool(len(n_rep)) and int(n_rep.min()) >= 2
+        for (ct, t), g in sub.groupby(["cell_type", "treatment"], dropna=False):
+            r = reps.loc[(ct, t)]  # index: replicate, metric
+            tot = r["sum"].groupby(level="replicate").sum()
+            for m in CATEGORY_METRICS:
+                if m not in r.index.get_level_values("metric"):
+                    continue
+                rm = r.xs(m, level="metric")
+                v = g.loc[g["metric"] == m, "value"].to_numpy(dtype=float)
+                frac = (rm["sum"] / tot.reindex(rm.index).replace(0, np.nan)).mean()
+                if replicate_sd:
+                    err, etype = float(rm["mean"].std(ddof=1)), "SD of replicate means"
+                else:
+                    err = float(v.std(ddof=1) / math.sqrt(len(v))) if len(v) > 1 else float("nan")
+                    etype = "SEM over nuclei"
+                rows.append({"antibody": ab, "feature": feat, "stain": st, "cell_type": ct, "treatment": t,
+                             "category": m, "category_label": labels[m], "mean_per_nucleus": float(rm["mean"].mean()),
+                             "error": err, "error_type": etype, "n_replicates": int(len(rm)),
+                             "n_nuclei": int(rm["count"].sum()), "spots": int(rm["sum"].sum()),
+                             "fraction_of_spots": float(frac) if np.isfinite(frac) else 0.0})
+    return pd.DataFrame(rows, columns=cols)
+
+
+def _category_figure(tab: pd.DataFrame, t_order: list, ct_order: list, header: str, path) -> None:
+    """Top: 100 % stacked bars of spot categories per condition. Bottom: mean spots per nucleus for each
+    category on its own axis, with error bars (and replicate means as dots when there are >= 2)."""
+    import matplotlib.pyplot as plt
+
+    t_order = [t for t in t_order if (tab["treatment"] == t).any()]
+    ct_order = [c for c in ct_order if (tab["cell_type"] == c).any()]
+    pos = _positions(t_order, ct_order)
+    labels = dict(zip(tab["category"], tab["category_label"]))
+    cats = [m for m in CATEGORY_METRICS if m in labels]
+    w = max(3.6, 0.8 + 0.42 * len(t_order) * (max(1, len(ct_order)) + 0.6))
+    fig = plt.figure(figsize=(3 * w + 1.6, 8.4))
+    gs = fig.add_gridspec(2, 3, height_ratios=[1, 1], hspace=0.62, wspace=0.28)
+    hatch = {c: ("" if i == 0 else "///") for i, c in enumerate(ct_order)}
+
+    # 100 % stacked bars
+    ax = fig.add_subplot(gs[0, :])
+    for (t, ct), x in pos.items():
+        g = tab[(tab["treatment"] == t) & (tab["cell_type"] == ct)].set_index("category")
+        if not len(g):
+            continue
+        bottom = 0.0
+        for m in cats:
+            f = float(g.loc[m, "fraction_of_spots"]) if m in g.index else 0.0
+            ax.bar(x, f * 100, 0.8, bottom=bottom, color=CATEGORY_COLORS[m], edgecolor="white", lw=0.6,
+                   label=labels[m] if (t, ct) == next(iter(pos)) else None)
+            if f >= 0.06:
+                ax.text(x, bottom + f * 50, f"{f * 100:.0f}%", ha="center", va="center", color="white", fontsize=7,
+                        fontweight="bold")
+            bottom += f * 100
+        ax.text(x, 101, f"{int(g['spots'].sum())} spots", ha="center", va="bottom", fontsize=6, color="0.3")
+    ax.set_ylim(0, 108)
+    ax.set_yticks([0, 25, 50, 75, 100])
+    ax.set_yticklabels(["0%", "25%", "50%", "75%", "100%"])
+    ax.set_ylabel("share of all spots", fontsize=9)
+    ax.set_title("Spot composition per condition (100 % stacked; spots pooled per replicate)", fontsize=10)
+    _group_axis(ax, t_order, ct_order, pos)
+    _box(ax)
+    ax.legend(fontsize=8, frameon=False, bbox_to_anchor=(1.005, 1.0), loc="upper left")
+
+    # mean per nucleus, one axis per category
+    etype = tab["error_type"].iloc[0]
+    for i, m in enumerate(cats):
+        ax = fig.add_subplot(gs[1, i])
+        top = 0.0
+        for (t, ct), x in pos.items():
+            g = tab[(tab["treatment"] == t) & (tab["cell_type"] == ct) & (tab["category"] == m)]
+            if not len(g):
+                continue
+            mean, err = float(g["mean_per_nucleus"].iloc[0]), float(g["error"].iloc[0])
+            ax.bar(x, mean, 0.75, color=CATEGORY_COLORS[m], edgecolor="black", lw=0.6, hatch=hatch.get(ct, ""),
+                   alpha=1.0 if not hatch.get(ct) else 0.75)
+            if np.isfinite(err):
+                ax.errorbar(x, mean, yerr=err, color="black", capsize=3, lw=1)
+            top = max(top, mean + (err if np.isfinite(err) else 0))
+        ax.set_ylim(0, top * 1.15 if top > 0 else 1)
+        ax.set_ylabel("spots per nucleus (mean)", fontsize=9)
+        ax.set_title(labels[m], fontsize=10)
+        _group_axis(ax, t_order, ct_order, pos)
+        _box(ax)
+    n_rep = int(tab["n_replicates"].max())
+    fig.suptitle(f"{header} - single- and double-positive spots · error bars: {etype}"
+                 + ("" if etype.startswith("SD") else f" ({n_rep} replicate per condition)"), fontsize=11)
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
 def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, out_dir,
                      orders: "dict | None" = None) -> list:
     """Per staining panel, with all cell types in the same graphs: a spots-per-nucleus figure, an
@@ -550,6 +661,8 @@ def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, 
             d.rmdir()
     dist = spot_count_distribution(long)
     dist.to_csv(out_dir.parent / "spot_count_distribution.csv", index=False)
+    cat_tables = spot_category_table(long)
+    cat_tables.to_csv(out_dir.parent / "spot_categories.csv", index=False)
     sel = long[(long["metric"].isin(SUPERPLOT_CHANNEL) & (long["feature"].str.contains("×") == False))  # noqa: E712
                | (long["metric"].isin(SUPERPLOT_COLOC) & long["feature"].str.contains("×"))]
     for ab, lsub in sel.groupby("antibody", dropna=False):
@@ -616,6 +729,15 @@ def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, 
             fig.savefig(path, dpi=150, bbox_inches="tight")
             plt.close(fig)
             written.append(path)
+
+            # composition (100 % stacked) and mean spots per nucleus per category, one figure per channel pair
+            for feat in pairs:
+                tab = cat_tables[(cat_tables["antibody"] == ab) & (cat_tables["feature"] == feat)]
+                if len(tab):
+                    sfx = f"_{slug(feat)}" if len(pairs) > 1 else ""
+                    path = out_dir / f"{name}{sfx}_spot_categories.png"
+                    _category_figure(tab, t_order, ct_order, header, path)
+                    written.append(path)
 
         # average spot size per nucleus (half maximum - independent of spot brightness), one panel per channel
         m = "spot_mean_area_halfmax_um2"

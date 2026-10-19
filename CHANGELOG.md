@@ -3,6 +3,16 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.8.0] - 2026-10-19
+
+### Added
+- `superplots/<panel>_spot_categories.png`, per channel pair:
+  - a 100 % stacked bar per condition: the share of spots that are double-positive or single-positive;
+  - bar charts of mean double-positive, A-only and B-only spots per nucleus, each on its own axis, with
+    error bars: SD of replicate means with >= 2 replicates per condition, otherwise SEM over nuclei
+    (labelled).
+- `spot_categories.csv` with the plotted values.
+
 ## [1.7.1] - 2026-10-19
 
 ### Changed

@@ -171,6 +171,13 @@ axis, cell types side by side, one color per cell type):
   nucleus, each as a SuperPlot and as a count distribution. A-only + A spots overlapping B = all A spots;
   double-positive spots merge touching A and B spots into one object, so they can be fewer than the
   overlapping A spots;
+- `<panel>_spot_categories.png` (`spot_categories.csv`), per channel pair:
+  - top: a 100 % stacked bar per condition, the share of all spots that are double-positive, A-only or
+    B-only (computed per replicate, averaged over replicates);
+  - bottom: mean double-positive, A-only and B-only spots per nucleus, each on its own axis, with error
+    bars. With >= 2 replicates per condition the error is the SD of the replicate means. With one
+    replicate per condition it is the SEM over nuclei, which describes one well and is not a
+    replicate-level error; the figure title says which is shown;
 - `<panel>_spot_area_per_nucleus.png`: for each channel, the average spot area per nucleus (size at half
   maximum; nuclei without spots are not included);
 - `<panel>_overview.png`, and one PNG per metric in `<panel>/`: nuclei as a beeswarm colored by replicate,
@@ -192,6 +199,7 @@ types: wild type (WT, parental, ...) first, then plate-map order. Both can be se
 | `spots.csv` | one row per spot |
 | `colocalization.csv` | one row per nucleus × channel pair: pixel and object colocalization |
 | `fields.csv` | per field: nuclei counts, background, saturation |
+| `spot_categories.csv` | per channel pair and condition: mean double-/single-positive spots per nucleus with error, share of all spots |
 | `spot_count_distribution.csv` | fraction of nuclei per spot-count class, per channel, cell type and treatment |
 | `replicate_summary.csv`, `condition_summary.csv` | medians per replicate; mean ± SD of replicate medians per condition |
 | `stats_omnibus.csv`, `stats_pairwise.csv` | Welch ANOVA (+ BH q); Games-Howell, Hedges' g, Cliff's delta (treatments within cell type, cell types within treatment) |
