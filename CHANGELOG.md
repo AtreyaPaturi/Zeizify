@@ -3,6 +3,15 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.7.1] - 2026-10-19
+
+### Changed
+- Single-positive spots are also in the overview figure and as per-metric PNGs (`<pair>_n_a_only.png`,
+  `<pair>_n_b_only.png`).
+- Channel-pair graph titles name the stains instead of A / B (e.g. "PML-only spots per nucleus").
+- `superplots/` is cleared at the start of each run, so figures from earlier versions or settings no
+  longer linger.
+
 ## [1.7.0] - 2026-10-19
 
 ### Added

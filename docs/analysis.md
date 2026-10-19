@@ -166,7 +166,8 @@ axis, cell types side by side, one color per cell type):
   nucleus for each channel pair, each as a SuperPlot and as the fraction of
   nuclei in each count class (0, then classes scaled to the 95th percentile of counts, e.g. 1-5, 6-10, 11-20,
   21-30, ≥ 31), pooled over replicates (`spot_count_distribution.csv`);
-- `<panel>_single_double_positive.png`: for each channel pair, A-only, B-only and double-positive spots per
+- `<panel>_single_double_positive.png` (also in the overview and as `<pair>_n_a_only.png` /
+  `<pair>_n_b_only.png` / `<pair>_n_double.png` in `<panel>/`): for each channel pair, A-only, B-only and double-positive spots per
   nucleus, each as a SuperPlot and as a count distribution. A-only + A spots overlapping B = all A spots;
   double-positive spots merge touching A and B spots into one object, so they can be fewer than the
   overlapping A spots;
@@ -194,7 +195,7 @@ types: wild type (WT, parental, ...) first, then plate-map order. Both can be se
 | `spot_count_distribution.csv` | fraction of nuclei per spot-count class, per channel, cell type and treatment |
 | `replicate_summary.csv`, `condition_summary.csv` | medians per replicate; mean ± SD of replicate medians per condition |
 | `stats_omnibus.csv`, `stats_pairwise.csv` | Welch ANOVA (+ BH q); Games-Howell, Hedges' g, Cliff's delta (treatments within cell type, cell types within treatment) |
-| `superplots/` | spots-per-nucleus figure, SuperPlot overview and per-metric SuperPlots, per staining panel |
+| `superplots/` | regenerated on every run (figures of earlier runs are removed): spots-per-nucleus figure, SuperPlot overview and per-metric SuperPlots, per staining panel |
 | `qc/` | per-field overlay: nuclei (white = analysed, red = QC-flagged) and spots per channel |
 | `masks/` | cached nuclear label images |
 | `analysis_manifest.json` | parameters, software versions, timings |

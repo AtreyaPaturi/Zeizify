@@ -289,6 +289,14 @@ def test_halfmax_size_is_independent_of_brightness():
     assert sizes[4.0][1] == sizes[1.0][1] == pytest.approx(2 * np.log(2) * np.pi * 9, rel=0.1)
 
 
+def test_pair_label_names_the_stains():
+    from zeizify.analysis.stats import pair_label
+
+    assert pair_label("A-only spots per nucleus", "PML×SUMO2/3") == "PML-only spots per nucleus"
+    assert pair_label("A spots overlapping B (fraction)", "PML×SUMO2/3") == "PML spots overlapping SUMO2/3 (fraction)"
+    assert pair_label("A→B nearest spot (µm)", "X×") == "A→B nearest spot (µm)"
+
+
 def test_auto_spot_threshold_splits_two_populations_only():
     from zeizify.analysis.segment import SEPARABILITY_MIN, auto_spot_threshold
 

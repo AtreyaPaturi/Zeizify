@@ -56,7 +56,7 @@ COLOC_METRICS = {
     "nn_ab_um": "A→B nearest spot (µm)",
 }
 SUPERPLOT_CHANNEL = ["spots_n", "spot_mean_area_halfmax_um2", "spots_area_frac", "cv", "enrichment"]
-SUPERPLOT_COLOC = ["n_double", "pearson", "tm1", "tm2", "frac_a_overlap"]
+SUPERPLOT_COLOC = ["n_double", "n_a_only", "n_b_only", "pearson", "tm1", "tm2", "frac_a_overlap"]
 WILDTYPE_KEYWORDS = ("wt", "wildtype", "wild", "parental", "control", "ctrl")
 REPLICATE_COLORS = ["#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#0072B2", "#D55E00", "#F0E442", "#999999"]  # Okabe-Ito
 
@@ -302,6 +302,15 @@ def _p_text(omni: pd.DataFrame, ab, metric, feat, cell_types) -> str:
     return ("Welch p: " + " · ".join(parts)) if parts else ""
 
 
+def pair_label(label: str, stain: str) -> str:
+    """Channel-pair metric label with A / B replaced by the two stains ("PML×SUMO2/3")."""
+    parts = str(stain).split("×")
+    if len(parts) != 2 or not all(parts):
+        return label
+    a, b = parts
+    return re.sub(r"\bB\b", b, re.sub(r"\bA\b", a, label))
+
+
 def _ylim(values: np.ndarray) -> tuple[float, float]:
     v = values[np.isfinite(values)]
     if not len(v):
@@ -533,6 +542,12 @@ def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, 
     orders = orders or default_orders(long)
     written = []
     out_dir.mkdir(parents=True, exist_ok=True)
+    # the folder is regenerated on every run: drop figures of earlier runs (renamed or removed plots)
+    for old in out_dir.rglob("*.png"):
+        old.unlink()
+    for d in sorted((p for p in out_dir.rglob("*") if p.is_dir()), reverse=True):
+        if not any(d.iterdir()):
+            d.rmdir()
     dist = spot_count_distribution(long)
     dist.to_csv(out_dir.parent / "spot_count_distribution.csv", index=False)
     sel = long[(long["metric"].isin(SUPERPLOT_CHANNEL) & (long["feature"].str.contains("×") == False))  # noqa: E712
@@ -639,6 +654,8 @@ def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, 
             st = ";".join(sorted(set(ls["stain"].astype(str)) - {"", "×"}))
             ptxt = _p_text(omni, ab, m, feat, ct_order)
             label = ls["metric_label"].iloc[0] if len(ls) else m
+            if "×" in feat:
+                label = pair_label(label, st)
             title = f"{st} ({feat})\n{label}" if st else f"{feat}\n{label}"
             handles = superplot(ax, ls, rs, title, ptxt, t_order, ct_order, legend=False) or handles
             f1, a1 = plt.subplots(figsize=(width + 1.2, 3.9))
