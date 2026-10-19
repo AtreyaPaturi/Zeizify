@@ -163,6 +163,8 @@ HELP: dict[str, dict] = {
                 "and rarely informative.",
                 "Double-positive spots per nucleus: spots present in both channels (overlapping by at least one "
                 "pixel) - plotted in <panel>_spots_per_nucleus.png, column n_double in colocalization.csv.",
+                "Single-positive spots per nucleus: spots of one channel touching no spot of the other (n_a_only, "
+                "n_b_only) - plotted with the double-positive spots in <panel>_single_double_positive.png.",
                 "Object-based: fraction of spots in one channel overlapping spots in the other, overlap relative to "
                 "chance (enrichment > 1 = more than random), and nearest-spot distances.",
                 "Costes randomizations > 0 adds a per-nucleus significance test (slower).",

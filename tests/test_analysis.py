@@ -106,6 +106,7 @@ def test_object_coloc_counts_shared_spots():
         assert oc["frac_a_overlap"] == pytest.approx(ns / na)
         assert oc["frac_b_overlap"] == pytest.approx(ns / nb)
         assert oc["n_a_overlap"] == oc["n_b_overlap"] == oc["n_double"] == ns
+        assert (oc["n_a_only"], oc["n_b_only"]) == (na - ns, nb - ns)
         assert oc["enrich_a"] > 3  # shared spots overlap far more than chance
         assert oc["nn_ab_um"] < 0.5 or ns <= na / 2
 
@@ -171,7 +172,8 @@ def test_run_analysis_end_to_end(tmp_path):
                  "stats_omnibus", "stats_pairwise"):
         assert (adir / f"{name}.csv").exists()
     assert (adir / "analysis_manifest.json").exists() and res.overview_plots and res.overview_plots[0].exists()
-    assert res.overview_plots[1].name.endswith("_spot_area_per_nucleus.png") and res.overview_plots[1].exists()
+    assert res.overview_plots[1].name.endswith("_single_double_positive.png") and res.overview_plots[1].exists()
+    assert res.overview_plots[2].name.endswith("_spot_area_per_nucleus.png") and res.overview_plots[2].exists()
     assert res.overview_plots[0].name.endswith("_spots_per_nucleus.png") and (adir / "spot_count_distribution.csv").exists()
     nuclei = pd.read_csv(adir / "nuclei.csv")
     assert len(nuclei) == 8 * 9 and nuclei["qc_pass"].all()
@@ -255,6 +257,7 @@ def test_double_positive_spot_counts_merge_touching_bodies():
     lb[34:37, 2:5] = 4  # B alone
     oc = object_coloc(la, lb, np.ones((40, 40), bool), 0.1)
     assert (oc["n_a"], oc["n_b"], oc["n_a_overlap"], oc["n_b_overlap"], oc["n_double"]) == (3, 4, 2, 3, 2)
+    assert (oc["n_a_only"], oc["n_b_only"]) == (1, 1)
 
 
 def test_fixed_spot_floor_drops_dim_spots():

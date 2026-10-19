@@ -3,6 +3,18 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.7.0] - 2026-10-19
+
+### Added
+- Single-positive spots per nucleus for every channel pair: A spots touching no B spot (`n_a_only`) and B
+  spots touching no A spot (`n_b_only`) in `colocalization.csv`, summarised and tested like the other
+  metrics.
+- `superplots/<panel>_single_double_positive.png`: A-only, B-only and double-positive spots per nucleus, each
+  as a SuperPlot and a count distribution.
+
+### Changed
+- `spot_count_distribution.csv` has a `metric` column (`spots_n`, `n_double`, `n_a_only`, `n_b_only`).
+
 ## [1.6.2] - 2026-10-16
 
 ### Added

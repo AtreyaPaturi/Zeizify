@@ -132,6 +132,8 @@ def object_coloc(la: np.ndarray, lb: np.ndarray, nucleus: np.ndarray, px_um: flo
     both = in_a & in_b
     out["n_a_overlap"] = int(len(np.unique(la[both])))  # A spots touching any B spot
     out["n_b_overlap"] = int(len(np.unique(lb[both])))
+    out["n_a_only"] = len(ids_a) - out["n_a_overlap"]  # single-positive: A spots touching no B spot
+    out["n_b_only"] = len(ids_b) - out["n_b_overlap"]
     # double-positive spots: connected A-or-B regions containing both, so one PML body overlapping two
     # SUMO foci counts once
     union, _ = ndi.label(in_a | in_b)

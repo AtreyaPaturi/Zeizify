@@ -46,6 +46,8 @@ COLOC_METRICS = {
     "tm1": "Manders tM1 (Costes)",
     "tm2": "Manders tM2 (Costes)",
     "n_double": "double-positive spots per nucleus",
+    "n_a_only": "A-only spots per nucleus (single-positive)",
+    "n_b_only": "B-only spots per nucleus (single-positive)",
     "n_a_overlap": "A spots overlapping B (count)",
     "n_b_overlap": "B spots overlapping A (count)",
     "frac_a_overlap": "A spots overlapping B (fraction)",
@@ -464,19 +466,23 @@ def count_bins(high: float) -> list[tuple[float, float, str]]:
     return out
 
 
+COUNT_METRICS = ["spots_n", "n_double", "n_a_only", "n_b_only"]
+
+
 def spot_count_distribution(long: pd.DataFrame) -> pd.DataFrame:
-    """Fraction of QC-passed nuclei in each spot-count class, per staining panel, channel (spots) or channel
-    pair (double-positive spots), cell type and treatment (nuclei pooled over replicates - descriptive)."""
-    cols = ["antibody", "feature", "cell_type", "treatment", "spots", "n_nuclei", "fraction"]
-    d = long[long["metric"].isin(["spots_n", "n_double"])].dropna(subset=["value"]) if len(long) else long
+    """Fraction of QC-passed nuclei in each spot-count class, per staining panel, count (spots per channel;
+    double-positive and single-positive spots per channel pair), cell type and treatment (nuclei pooled
+    over replicates - descriptive)."""
+    cols = ["antibody", "feature", "metric", "cell_type", "treatment", "spots", "n_nuclei", "fraction"]
+    d = long[long["metric"].isin(COUNT_METRICS)].dropna(subset=["value"]) if len(long) else long
     rows = []
-    for (ab, feat), sub in d.groupby(["antibody", "feature"], dropna=False):
+    for (ab, feat, m), sub in d.groupby(["antibody", "feature", "metric"], dropna=False):
         bins = count_bins(float(sub["value"].quantile(0.95)))
         for (ct, t), g in sub.groupby(["cell_type", "treatment"], dropna=False):
             v = g["value"].to_numpy()
             for lo, hi, label in bins:
-                rows.append({"antibody": ab, "feature": feat, "cell_type": ct, "treatment": t, "spots": label,
-                             "n_nuclei": len(v), "fraction": float(((v >= lo) & (v <= hi)).mean())})
+                rows.append({"antibody": ab, "feature": feat, "metric": m, "cell_type": ct, "treatment": t,
+                             "spots": label, "n_nuclei": len(v), "fraction": float(((v >= lo) & (v <= hi)).mean())})
     return pd.DataFrame(rows, columns=cols)
 
 
@@ -558,11 +564,40 @@ def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, 
                 superplot(a1, ls, rs, f"{st} ({feat_txt}): {what}", _p_text(omni, ab, m, feat, ct_order),
                           t_order, ct_order)
                 a1.set_ylabel(what, fontsize=9)
-                _count_bars(a2, dist[(dist["antibody"] == ab) & (dist["feature"] == feat)], t_order, ct_order,
-                            f"{st} ({feat_txt}): distribution (nuclei pooled)")
+                _count_bars(a2, dist[(dist["antibody"] == ab) & (dist["feature"] == feat) & (dist["metric"] == m)],
+                            t_order, ct_order, f"{st} ({feat_txt}): distribution (nuclei pooled)")
             fig.suptitle(f"{header} - spots per nucleus", fontsize=11)
             fig.tight_layout()
             path = out_dir / f"{name}_spots_per_nucleus.png"
+            fig.savefig(path, dpi=150, bbox_inches="tight")
+            plt.close(fig)
+            written.append(path)
+
+        # single- vs double-positive spots per channel pair: A only, B only, both
+        pairs = list(dict.fromkeys(long.loc[(long["antibody"] == ab) & (long["metric"] == "n_double"), "feature"]))
+        if pairs:
+            lab_all = long[long["antibody"] == ab]
+            rows = [(p, m) for p in pairs for m in ("n_a_only", "n_b_only", "n_double")]
+            fig, axes = plt.subplots(len(rows), 2, figsize=(2 * width + 3.2, 4.0 * len(rows)), squeeze=False)
+            for (a1, a2), (feat, m) in zip(axes, rows):
+                ls = lab_all[(lab_all["metric"] == m) & (lab_all["feature"] == feat)]
+                rs = rsub[(rsub["metric"] == m) & (rsub["feature"] == feat)]
+                ch_a, ch_b = feat.split("×")
+                stains = sorted(set(ls["stain"].astype(str)) - {"", "×"})
+                st_a, st_b = stains[0].split("×") if stains else (ch_a, ch_b)
+                what = {"n_a_only": f"{st_a} only ({ch_a}, no {st_b})",
+                        "n_b_only": f"{st_b} only ({ch_b}, no {st_a})",
+                        "n_double": f"{st_a} + {st_b} double-positive ({ch_a}+{ch_b})"}[m]
+                superplot(a1, ls, rs, f"{what}: spots per nucleus", _p_text(omni, ab, m, feat, ct_order),
+                          t_order, ct_order)
+                a1.set_ylabel("spots per nucleus", fontsize=9)
+                a1.set_ylim(bottom=0)
+                _count_bars(a2, dist[(dist["antibody"] == ab) & (dist["feature"] == feat) & (dist["metric"] == m)],
+                            t_order, ct_order, f"{what}: distribution (nuclei pooled)")
+            fig.suptitle(f"{header} - single- and double-positive spots per nucleus (single-positive: the spot "
+                         "touches no spot of the other channel)", fontsize=11)
+            fig.tight_layout()
+            path = out_dir / f"{name}_single_double_positive.png"
             fig.savefig(path, dpi=150, bbox_inches="tight")
             plt.close(fig)
             written.append(path)
