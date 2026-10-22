@@ -3,6 +3,24 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.9.0] - 2026-10-22
+
+### Added
+- **Single-cell figures**: a new *Figures* page, `zeizify figure`, and the `zeizify.cellfigure` module.
+  - One representative cell per cell type × treatment, picked automatically or chosen by hand.
+    Automatic picks are ranked against the condition's medians (spot counts, double-positive spots,
+    Pearson's r, spot size), among interphase, isolated nuclei whose signal is nuclear. Each condition has a
+    ranked list with thumbnails for manual choice.
+  - Custom crop size in µm.
+  - Layout: the Contrast page's panel and color choices, panel order, treatments as rows or columns, cell
+    types side by side or stacked, renamed labels, and journal widths (89 / 120 / 183 mm), a 16:9 slide or
+    a custom width. Font, gaps, scale bar and nucleus outline are adjustable.
+  - Display: linear, background-subtracted, one range per channel shared by every condition (or per
+    panel), with an optional fixed maximum.
+  - Export: RGB PNG / TIFF with dpi, and PDF / SVG with editable text, plus `cells.csv`, a draft
+    `legend.txt` and `figure_settings.json`.
+- After an analysis, a *Single-cell figure* button on the Analyze page.
+
 ## [1.8.0] - 2026-10-19
 
 ### Added

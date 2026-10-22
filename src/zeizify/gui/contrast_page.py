@@ -124,14 +124,14 @@ class FigureLayoutCard(Card):
               ("With nuclear stain", lambda p, nuc: len(p) == 2 and nuc in p),
               ("Co-localization", lambda p, nuc: len([c for c in p if c != nuc]) >= 2)]
 
-    def __init__(self, master, channels: list[str], on_change):
+    def __init__(self, master, channels: list[str], on_change, title: str = "Figure layout",
+                 subtitle: str = "Tick the panels to include in each field's layout PNG, left to right. Merges add the "
+                                 "channels' colors, so co-localized signal appears as the mixed color (e.g. green + "
+                                 "magenta = white).", defaults=default_panels):
         super().__init__(master)
-        self.channels, self.on_change = channels, on_change
+        self.channels, self.on_change, self.default_fn = channels, on_change, defaults
         self.nuc = nuclear_channel(channels)
-        section_title(self, "Figure layout",
-                      "Tick the panels to include in each field's layout PNG, left to right. Merges add the channels' "
-                      "colors, so co-localized signal appears as the mixed color (e.g. green + magenta = white).").pack(
-            fill="x", padx=18, pady=(14, 8))
+        section_title(self, title, subtitle).pack(fill="x", padx=18, pady=(14, 8))
 
         colors_row = ctk.CTkFrame(self, fg_color="transparent")
         colors_row.pack(fill="x", padx=18, pady=(0, 6))
@@ -156,7 +156,7 @@ class FigureLayoutCard(Card):
                      width=110, height=28).pack(side="left", padx=(0, 6))
         ghost_button(presets, "Defaults", self._reset, width=90, height=28).pack(side="left")
 
-        defaults = set(default_panels(channels))
+        defaults = set(self.default_fn(channels))
         self.checks: dict[tuple, ctk.CTkCheckBox] = {}
         cands = candidate_panels(channels)
         for title, test in self.GROUPS:
@@ -193,7 +193,7 @@ class FigureLayoutCard(Card):
     def _reset(self) -> None:
         for c, m in self.color_menus.items():
             m.set(default_color_name(c))
-        defaults = set(default_panels(self.channels))
+        defaults = set(self.default_fn(self.channels))
         for p, cb in self.checks.items():
             cb.select() if p in defaults else cb.deselect()
         self._changed()

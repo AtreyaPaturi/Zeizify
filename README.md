@@ -48,6 +48,9 @@ control-referenced contrast ranges, configurable figure-style layout PNGs and a 
   extracted images: Cellpose or classical nuclei, per-nucleus spot detection, counts, sizes, dispersal,
   Pearson / Manders–Costes / ICQ and object overlap, replicate-level statistics and SuperPlots. Runs in
   parallel. See [Zeizify Analyze](#zeizify-analyze).
+- **Single-cell figures.** Publication figures with one representative cell per cell type and treatment,
+  chosen to match each condition's measured results (or picked by hand), cropped to a custom size and laid
+  out at journal widths, exported as PNG / TIFF / PDF / SVG. See [Figures](#figures).
 
 ## Installation
 
@@ -233,6 +236,39 @@ are reported but no tests.
 
 Full methods, the source each step follows, and validation are in [`docs/analysis.md`](docs/analysis.md).
 
+## Figures
+
+Make a publication figure with one representative cell per cell type and treatment, from an analysed
+output folder. In the app: **Figures** page (or *Single-cell figure* after an analysis). From the command line:
+
+```bash
+zeizify figure out/                                    # defaults: all conditions, 30 x 30 µm, 183 mm wide
+zeizify figure out/ --treatments "MOCK,ML,MG,ML+MG" --treatment-labels "ML=ML792; MG=MG132; ML+MG=ML792 + MG132" \
+    --panels "DAPI|AF488|AF594|AF488+AF594" --color AF488=green --color AF594=magenta \
+    --crop 30 30 --width journal2 --font-size 8 --format png,pdf,svg --pick "KO1,MG=G2,P32,19"
+```
+
+1. **Cells.** For each condition, Zeizify ranks the analysed nuclei by how closely they match the
+   condition's medians: spot counts, double-positive spots, Pearson's r, spot size. It only considers
+   interphase nuclei that fit in the crop, are isolated where possible, and have their signal inside the
+   nucleus. The best match is picked automatically. In the app, every condition has a ranked list with
+   thumbnails for swapping the cell; on the command line, use `--pick`.
+2. **Layout.** The same panel and color choices as the Contrast page: single channels, merges, colorblind-safe
+   presets. You can also set:
+   - the panel order;
+   - treatments as rows or columns, and cell types side by side or stacked;
+   - renamed labels;
+   - the width: journal 1, 1.5 or 2 columns (89 / 120 / 183 mm), a 16:9 slide, or custom;
+   - the font, gaps, scale bar and nucleus outline.
+3. **Display.** Background-subtracted and linear, with one range per channel shared by every condition, so
+   brightness can be compared between panels. You can also scale each panel separately, or fix a maximum
+   per channel.
+4. **Output** (`out/figures/<name>/`):
+   - the figure as RGB PNG / TIFF at 300 or 600 dpi, and PDF / SVG with editable text;
+   - `cells.csv`: each chosen cell and its values against the condition medians;
+   - `legend.txt`: a draft figure legend;
+   - `figure_settings.json`.
+
 ## How it works
 
 See [`docs/methods.md`](docs/methods.md) for a methods-section-ready description,
@@ -264,6 +300,7 @@ src/zeizify/
 ├── plate.py          plate formats and plate map CSV
 ├── cli.py            command-line interface
 ├── analysis/         Zeizify Analyze: segment, measure, coloc, stats, run (parallel)
+├── cellfigure.py     single-cell publication figures (cell ranking, crops, layout, export)
 └── gui/              desktop app (customtkinter); help text lives in gui/help.py
 tests/                pytest suite with synthetic CZI fixtures
 docs/                 methods, validation, screenshots

@@ -127,7 +127,79 @@ def build_parser() -> argparse.ArgumentParser:
                    help="comma-separated cell-type order (default: wild type, then plate-map order)")
     a.add_argument("--workers", type=int, default=d.workers)
     a.add_argument("--no-qc", action="store_true", help="skip QC overlay images")
+
+    g = sub.add_parser("figure", help="publication single-cell figure from an analysed output folder")
+    g.add_argument("out", type=Path, help="Zeizify output folder, analysed with 'zeizify analyze'")
+    g.add_argument("--name", default="single_cells", help="figure name (folder OUT/figures/NAME)")
+    g.add_argument("--cell-types", default="", metavar="A,B", help="cell types to show, in order (default: all)")
+    g.add_argument("--treatments", default="", metavar="A,B", help="treatments to show, in order (default: all)")
+    g.add_argument("--cell-type-labels", default="", metavar="'WT=Wild type; KO1=PML KO'")
+    g.add_argument("--treatment-labels", default="", metavar="'ML=ML792; MG=MG132'")
+    g.add_argument("--panels", default="", metavar="'DAPI|AF488|AF594|AF488+AF594'",
+                   help="panels in order; '+' merges channels (default: nuclear, each signal, all signals merged)")
+    g.add_argument("--color", action="append", default=[], metavar="CHANNEL=COLOR")
+    g.add_argument("--crop", type=float, nargs=2, default=[30.0, 30.0], metavar=("W_UM", "H_UM"))
+    g.add_argument("--rows", choices=["treatment", "panel"], default="treatment",
+                   help="treatments as rows (stains across) or stains as rows")
+    g.add_argument("--blocks", choices=["side", "stacked"], default="side", help="cell types side by side or stacked")
+    g.add_argument("--width", default="journal2",
+                   help="journal1 (89 mm), journal1.5 (120 mm), journal2 (183 mm), slide (13.33 in), or a width in mm")
+    g.add_argument("--font", default="Arial")
+    g.add_argument("--font-size", type=float, default=8.0)
+    g.add_argument("--dpi", type=int, default=300)
+    g.add_argument("--format", default="png,pdf", help="comma-separated: png, tif, pdf, svg")
+    g.add_argument("--contrast", choices=["shared", "panel"], default="shared",
+                   help="one display range per channel for all conditions, or per panel")
+    g.add_argument("--saturated", type=float, default=0.3, help="%% of nuclear pixels allowed to saturate")
+    g.add_argument("--max", action="append", default=[], metavar="CHANNEL=VALUE", help="fixed display maximum")
+    g.add_argument("--outline", choices=["none", "nuclear", "all"], default="nuclear")
+    g.add_argument("--scale-bar", type=float, default=5.0, metavar="UM", help="0 = none")
+    g.add_argument("--pick", action="append", default=[], metavar="CELLTYPE,TREATMENT=WELL,FIELD,NUCLEUS",
+                   help="use this nucleus instead of the automatic pick (repeatable)")
     return p
+
+
+def _figure(args) -> int:
+    from . import cellfigure as cf
+
+    cd = cf.load_cells(args.out)
+    cts = _csv(args.cell_types) or list(dict.fromkeys(c for c, _ in cd.conditions()))
+    trs = _csv(args.treatments) or list(dict.fromkeys(t for _, t in cd.conditions()))
+    widths = {"journal1": 89 / 25.4, "journal1.5": 120 / 25.4, "journal2": 183 / 25.4, "slide": 13.333}
+    width = widths.get(args.width.lower()) or float(args.width) / 25.4
+    colors = _parse_colors(args.color)
+    if cd.nuclear and cd.nuclear not in colors:
+        colors[cd.nuclear] = "Gray"
+    opts = cf.FigureOptions(
+        panels=cf.parse_order(args.panels) if args.panels else cf.default_figure_panels(cd.ds.channels),
+        colors=colors, cell_types=cts, treatments=trs, cell_type_labels=cf.parse_labels(args.cell_type_labels),
+        treatment_labels=cf.parse_labels(args.treatment_labels), crop_w_um=args.crop[0], crop_h_um=args.crop[1],
+        rows=args.rows, blocks=args.blocks, width_in=width, dpi=args.dpi, font=args.font, font_size=args.font_size,
+        contrast=args.contrast, saturated_pct=args.saturated, max_override={k: v for k, v in _fixed(args.max).items() if v},
+        outline=args.outline, scale_bar_um=args.scale_bar, scale_bar="last" if args.scale_bar > 0 else "none",
+        formats=_csv(args.format))
+    conds = [(c, t) for c in cts for t in trs if (c, t) in set(cd.conditions())]
+    manual = {}
+    for it in args.pick:
+        cond, _, where = it.partition("=")
+        ct, _, t = cond.partition(",")
+        well, fld, nid = [x.strip() for x in where.split(",")]
+        manual[(ct.strip(), t.strip())] = cf.CellChoice(ct.strip(), t.strip(), well, fld, int(nid), "manual")
+    ranked = cf.auto_choices(cd, [k for k in conds if k not in manual], opts.crop_w_um, opts.crop_h_um, n=5,
+                             progress=lambda i, n, item: print(f"  ranked {i}/{n}: {item}"))
+    choices = {}
+    for k in conds:
+        if k in manual:
+            choices[k] = manual[k]
+        elif len(ranked.get(k, [])):
+            choices[k] = cf.choice_from_row(ranked[k].iloc[0])
+            print(f"{k[0]} · {k[1]}: {cf.describe(ranked[k].iloc[0], cd)}")
+        else:
+            print(f"{k[0]} · {k[1]}: no suitable cell - shown as n/a (use --pick)")
+    res = cf.export(cd, choices, opts, args.name)
+    print("Wrote", ", ".join(str(p) for p in res["files"]))
+    print(f"Cells, legend and settings: {res['folder']}")
+    return 0
 
 
 def _csv(text: str) -> list[str]:
@@ -180,6 +252,8 @@ def main(argv: "list[str] | None" = None) -> int:
 
     if args.cmd == "analyze":
         return _analyze(args)
+    if args.cmd == "figure":
+        return _figure(args)
 
     from . import pipeline
 

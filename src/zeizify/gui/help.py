@@ -194,6 +194,51 @@ HELP: dict[str, dict] = {
             ]),
         ],
     },
+    "figure": {
+        "title": "Figures",
+        "intro": "Publication single-cell figures: one representative cell per cell type and treatment, cropped "
+                 "to a custom size and laid out with the stains as columns or rows. Needs an output folder that "
+                 "has been analysed on the Analyze page.",
+        "sections": [
+            ("Quick start", [
+                "Choose the analysed output folder (filled in automatically after Analyze).",
+                "Tick the cell types and treatments to show, and set the crop size in µm.",
+                "Press Pick representative cells, then Preview, then Export figure.",
+            ]),
+            ("Choosing cells", [
+                "For each condition the cells are ranked by how closely they match that condition's medians: spot "
+                "counts per channel, double-positive spots, Pearson's r and spot size must be close; intensity, CV "
+                "and nuclear size break ties.",
+                "Only interphase nuclei are used (not condensed or dim in DAPI), the whole nucleus must fit in the "
+                "crop, isolated cells are preferred, and the signal must sit in the nucleus (rounded mitotic cells "
+                "are skipped).",
+                "Each condition has a ranked list (#1 = automatic). Pick another entry to swap the cell - the "
+                "thumbnail and the values vs the condition median update. cells.csv records every choice.",
+            ]),
+            ("Layout", [
+                "Panels and colors: the same choices as on the Contrast page - single channels, merges, and each "
+                "channel's pseudocolor (Green / Magenta is colorblind-safe).",
+                "Panel order: edit the text to reorder, e.g. DAPI | AF488 | AF594 | AF488+AF594.",
+                "Treatments as rows (stains across) or stains as rows (treatments across); cell types side by side "
+                "or stacked.",
+                "Order and rename: type the order (MOCK, ML, MG, ML+MG) and display names (ML=ML792; MG=MG132).",
+                "Width: journal 1 column (89 mm), 1.5 (120 mm), 2 columns (183 mm), a 16:9 slide, or custom. The "
+                "height follows from the number of rows and the crop shape. Arial 7-8 pt suits most journals.",
+            ]),
+            ("Display", [
+                "Images are background-subtracted and scaled linearly. 'Same range in every condition' uses one "
+                "range per channel so brightness can be compared between panels (recommended); 'Each panel "
+                "separately' does not allow that comparison - say so in the legend.",
+                "Saturated pixels sets the maximum (default 0.3 % of nuclear pixels); type a maximum per channel "
+                "to fix it, e.g. to match another figure.",
+                "A dashed outline marks the nucleus that was measured; a scale bar goes on the bottom-right panel.",
+            ]),
+            ("Output", [
+                "PNG / TIFF at 300 or 600 dpi; PDF / SVG keep text editable for Illustrator or Inkscape.",
+                "legend.txt is a draft figure legend (how cells were chosen, channels, display ranges, scale bar).",
+            ]),
+        ],
+    },
     "contrast": {
         "title": "Contrast",
         "intro": "Choose one reference field per antibody panel. Its brightness range is applied to every other "

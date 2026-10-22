@@ -18,7 +18,8 @@ def test_changelog_has_entry_for_version():
 
 
 def test_every_page_has_help():
+    from zeizify.gui.app import NAV
     from zeizify.gui.help import HELP
 
-    assert set(HELP) == {"plate", "run", "contrast", "analyze"}
+    assert set(HELP) == {key for key, _, _ in NAV} == {"plate", "run", "contrast", "analyze", "figure"}
     assert all(g["intro"] and g["sections"] for g in HELP.values())

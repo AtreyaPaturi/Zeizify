@@ -439,11 +439,18 @@ class AnalyzePage(ctk.CTkFrame):
         ghost_button(a, "Open SuperPlots", lambda: open_path(res.analysis_dir / "superplots"), width=130).pack(
             side="left", padx=6)
         ghost_button(a, "Open QC overlays", lambda: open_path(res.analysis_dir / "qc"), width=130).pack(side="left")
+        ghost_button(a, "Single-cell figure  ▣", self._to_figures, width=160).pack(side="left", padx=6)
         for pth in res.overview_plots[:4]:
             img = Image.open(pth)
             w = min(1000, img.width)
             ctk.CTkLabel(c, text="", image=ctk.CTkImage(img, img, size=(w, int(img.height * w / img.width)))).pack(
                 padx=18, pady=(4, 14))
+
+    def _to_figures(self) -> None:
+        page = self.app.pages["figure"]
+        if self.out is not None:
+            page.load(self.out)
+        self.app.show("figure")
 
     def on_theme_change(self) -> None:
         pass

@@ -19,13 +19,15 @@ from .. import __version__
 from . import theme as T
 from .analyze_page import AnalyzePage
 from .contrast_page import ContrastPage
+from .figure_page import FigurePage
 from .help import AboutDialog, HelpPanel
 from .plate_page import PlatePage
 from .run_page import RunPage
 from .state import Settings
 from .widgets import Toast
 
-NAV = [("plate", "▦", "Plate map"), ("run", "➜", "Run"), ("contrast", "◐", "Contrast"), ("analyze", "▤", "Analyze")]
+NAV = [("plate", "▦", "Plate map"), ("run", "➜", "Run"), ("contrast", "◐", "Contrast"), ("analyze", "▤", "Analyze"),
+       ("figure", "▣", "Figures")]
 
 
 class App(ctk.CTk):
@@ -69,7 +71,8 @@ class App(ctk.CTk):
         self.current = "plate"
         self.bind("<F1>", lambda e: self.toggle_help())
         self.pages = {"plate": PlatePage(self.stack, self), "run": RunPage(self.stack, self),
-                      "contrast": ContrastPage(self.stack, self), "analyze": AnalyzePage(self.stack, self)}
+                      "contrast": ContrastPage(self.stack, self), "analyze": AnalyzePage(self.stack, self),
+                      "figure": FigurePage(self.stack, self)}
         self.toaster = Toast(self.main)
         self.show("run" if self.pages["plate"].state.n_labeled() else "plate")
 

@@ -62,18 +62,19 @@ def make_field(seed=0, n_spots=(3, 4, 5, 6, 7, 8, 9, 10, 11), shared=0.5, b_extr
 
 def write_zeizify_output(out: Path, design: list[dict]) -> None:
     """A minimal Zeizify output folder: per-channel TIFFs, intensity_report.csv and run_manifest.json.
-    design: [{"well", "field", "treatment", "seed", "shared"}]."""
+    design: [{"well", "field", "treatment", "seed", "shared"[, "cell_type"]}]."""
     out.mkdir(parents=True, exist_ok=True)
     folder = out / "X_Y"
     folder.mkdir(exist_ok=True)
     rows = []
     for d in design:
         dapi, a, b, _ = make_field(seed=d["seed"], n_spots=(6,) * 9, shared=d["shared"])
-        label = f"WT_{d['treatment']}_X_Y"
+        ct = d.get("cell_type", "WT")
+        label = f"{ct}_{d['treatment']}_X_Y"
         for ch, img, stain in (("AF488", a, "X"), ("AF594", b, "Y"), ("DAPI", dapi, "")):
             p = folder / f"{label}_{d['well']}_{d['field']}_{ch}.tif"
             tifffile.imwrite(p, img, imagej=True, resolution=(1 / PX, 1 / PX), metadata={"unit": "um"})
-            rows.append({"Well": d["well"], "Field": d["field"], "CellType": "WT", "Treatment": d["treatment"],
+            rows.append({"Well": d["well"], "Field": d["field"], "CellType": ct, "Treatment": d["treatment"],
                          "Antibody": "X+Y", "Label": label, "Channel": ch, "Stain": stain, "OwnMin": int(img.min()),
                          "OwnMax": int(img.max()), "Saturated": False, "ControlWell": "", "ControlField": "",
                          "ControlMin": "", "ControlMax": "", "Path": str(p)})
