@@ -214,6 +214,11 @@ HELP: dict[str, dict] = {
                 "are skipped).",
                 "Each condition has a ranked list (#1 = automatic). Pick another entry to swap the cell - the "
                 "thumbnail and the values vs the condition median update. cells.csv records every choice.",
+                "Choose on image… shows the whole field: step through the condition's fields (◀ ▶), switch the "
+                "view (merge or single channels), and click any nucleus. Its values vs the condition median, the "
+                "crop box and warnings (condensed DAPI, crop off the image) appear; Use this cell puts it in the "
+                "figure. Outlines: white = analysed, red = flagged by QC (cannot be used), yellow = chosen; "
+                "#1, #2 ... mark the ranked suggestions.",
             ]),
             ("Layout", [
                 "Panels and colors: the same choices as on the Contrast page - single channels, merges, and each "

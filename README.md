@@ -252,7 +252,8 @@ zeizify figure out/ --treatments "MOCK,ML,MG,ML+MG" --treatment-labels "ML=ML792
    condition's medians: spot counts, double-positive spots, Pearson's r, spot size. It only considers
    interphase nuclei that fit in the crop, are isolated where possible, and have their signal inside the
    nucleus. The best match is picked automatically. In the app, every condition has a ranked list with
-   thumbnails for swapping the cell; on the command line, use `--pick`.
+   thumbnails for swapping the cell, and **Choose on image…** opens the whole field to click any nucleus,
+   with its values against the condition median and the crop box shown. On the command line, use `--pick`.
 2. **Layout.** The same panel and color choices as the Contrast page: single channels, merges, colorblind-safe
    presets. You can also set:
    - the panel order;

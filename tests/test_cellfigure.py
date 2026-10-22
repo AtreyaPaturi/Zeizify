@@ -102,3 +102,23 @@ def test_crop_pads_outside_the_image():
     a = np.arange(16, dtype=np.float32).reshape(4, 4)
     c = cf._crop(a, -1, 2, 3, 3)
     assert c.shape == (3, 3) and c[0].tolist() == [0, 0, 0] and c[1, :2].tolist() == [2, 3] and c[1, 2] == 0
+
+
+def test_field_overview_click_and_summary(analysed):
+    cd = cf.load_cells(analysed)
+    fields = cf.condition_fields(cd, "KO", "Drug")
+    assert [(f.well, f.field) for f in fields] == [("B2", "P1"), ("B2", "P2")]
+    f = fields[0]
+    rgb, small = cf.field_overview(cd, f.well, f.field, ("AF488", "AF594", "DAPI"), {"DAPI": "Blue"}, factor=4)
+    assert rgb.dtype == np.uint8 and rgb.shape == (*small.shape, 3) and small.max() > 0
+    row = cd.cells[(cd.cells["well"] == f.well) & (cd.cells["field"] == f.field)].iloc[0]
+    y, x = int(row["centroid_y_um"] / PX), int(row["centroid_x_um"] / PX)
+    nid = cf.nucleus_at(cd, f.well, f.field, y, x)
+    assert nid == int(row["nucleus_id"])
+    assert cf.nucleus_at(cd, f.well, f.field, 0, 0) == 0  # background
+    assert cf.nucleus_at(cd, f.well, f.field, -5, 3) == 0  # outside the image
+    s = cf.cell_summary(cd, "KO", "Drug", f.well, f.field, nid)
+    assert s["median_AF488_spots_n"] == pytest.approx(np.nanmedian(
+        cd.cells.loc[(cd.cells["cell_type"] == "KO") & (cd.cells["treatment"] == "Drug"), "AF488_spots_n"]))
+    assert cf.cell_summary(cd, "KO", "Drug", f.well, f.field, 999) is None
+    assert f"#{nid}" in cf.describe(s, cd)

@@ -3,6 +3,17 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.10.0] - 2026-10-22
+
+### Added
+- Figures page: *Choose on image…* for every condition. It opens the whole field image, with nuclei
+  outlined (analysed / QC-flagged / chosen) and the ranked suggestions labelled. You can:
+  - step through the condition's fields and switch between merge and single-channel views;
+  - click a nucleus to see its values against the condition median, the crop box and any warnings
+    (condensed DAPI, crop off the image);
+  - use it in the figure, where it is recorded as a manual pick.
+- `cellfigure.field_overview`, `nucleus_at`, `cell_summary`, `condition_fields`, `preview_ranges`.
+
 ## [1.9.0] - 2026-10-22
 
 ### Added

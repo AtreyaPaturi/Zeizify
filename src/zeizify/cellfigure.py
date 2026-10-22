@@ -383,14 +383,9 @@ def thumbnail(cd: CellData, choice: CellChoice, opts: FigureOptions, size: int =
                         contrast="panel", saturated_pct=opts.saturated_pct)
     k = (choice.cell_type, choice.treatment)
     crop = crops_for(cd, {k: choice}, one, cache)[k]
-    # one range per channel for every condition (as in the figure), from the measured nuclear means: a dim,
-    # diffuse condition stays dim instead of being stretched
-    rng = {}
+    rng = preview_ranges(cd, merge)
     for c in merge:
-        col = f"{c}_mean_bgsub"
-        if col in cd.cells and cd.cells[col].notna().any():
-            rng[c] = max(4.0 * float(cd.cells.groupby(["cell_type", "treatment"])[col].median().max()), 1.0)
-        else:
+        if c not in rng:
             rng.update({cc: v for (*_, cc), v in display_ranges({k: crop}, one).items() if cc == c})
     arr = (_rgb(crop, merge, rng, k, opts.colors) * 255).astype(np.uint8)
     own = crop["own"]
@@ -398,6 +393,81 @@ def thumbnail(cd: CellData, choice: CellChoice, opts: FigureOptions, size: int =
     img = Image.fromarray(arr)
     img.thumbnail((size, size))
     return img
+
+
+def preview_ranges(cd: CellData, channels) -> dict[str, float]:
+    """Display maximum per channel for previews, the same in every condition, from the measured nuclear
+    means (4 x the highest condition median; DAPI: 2 x), so a dim, diffuse condition stays dim instead of
+    being stretched."""
+    out = {}
+    g = cd.cells.groupby(["cell_type", "treatment"])
+    for c in channels:
+        col, k = (f"{c}_mean_bgsub", 4.0) if c != cd.nuclear else ("dapi_mean", 2.0)
+        if col in cd.cells and cd.cells[col].notna().any():
+            out[c] = max(k * float(g[col].median().max()), 1.0)
+    return out
+
+
+def condition_fields(cd: CellData, cell_type: str, treatment: str) -> list:
+    """The fields of one condition, in plate order."""
+    return [f for f in cd.ds.fields if f.cell_type == cell_type and f.treatment == treatment]
+
+
+def field_overview(cd: CellData, well: str, fld: str, view: tuple, colors: dict[str, str], factor: int = 4,
+                   cache: "_FieldCache | None" = None) -> tuple[np.ndarray, np.ndarray]:
+    """Whole field, downsampled by `factor` (max-pooled, so small bodies stay visible), as RGB uint8 with
+    the channels in `view` blended in their colors (preview ranges, the same for every condition), and the
+    downsampled nuclear label image for drawing outlines and picking."""
+    from skimage.measure import block_reduce
+
+    cache = cache or _FieldCache(cd)
+    fi, mask, imgs, bg = cache.get(well, fld)
+    rng = preview_ranges(cd, view)
+    acc = None
+    for c in view:
+        if c not in imgs:
+            continue
+        small = block_reduce(np.clip(imgs[c] - bg[c], 0, None), (factor, factor), np.max)
+        vmax = rng.get(c) or max(float(np.percentile(small, 99.7)), 1.0)
+        layer = np.clip(small / vmax, 0, 1)[..., None] * np.array(
+            COLORS[colors.get(c) or default_color_name(c)], dtype=np.float32)
+        acc = layer if acc is None else acc + layer
+    small_mask = mask[::factor, ::factor][:acc.shape[0], :acc.shape[1]] if acc is not None else mask[::factor, ::factor]
+    if acc is None:
+        acc = np.zeros((*small_mask.shape, 3), dtype=np.float32)
+    return (np.clip(acc, 0, 1) * 255).astype(np.uint8), small_mask
+
+
+def nucleus_at(cd: CellData, well: str, fld: str, y: int, x: int, radius: int = 0,
+               cache: "_FieldCache | None" = None) -> int:
+    """Nuclear label at full-resolution (y, x); with radius > 0 the nearest nucleus within it. 0 = none."""
+    cache = cache or _FieldCache(cd)
+    _, mask, _, _ = cache.get(well, fld)
+    if not (0 <= y < mask.shape[0] and 0 <= x < mask.shape[1]):
+        return 0
+    if mask[y, x] or radius <= 0:
+        return int(mask[y, x])
+    y0, x0 = max(0, y - radius), max(0, x - radius)
+    win = mask[y0:y + radius + 1, x0:x + radius + 1]
+    yy, xx = np.nonzero(win)
+    if not len(yy):
+        return 0
+    i = int(np.argmin((yy + y0 - y) ** 2 + (xx + x0 - x) ** 2))
+    return int(win[yy[i], xx[i]])
+
+
+def cell_summary(cd: CellData, cell_type: str, treatment: str, well: str, fld: str, nucleus_id: int):
+    """The cell's row with the condition medians attached (as rank_candidates returns it), or None when
+    the nucleus was not analysed or failed QC."""
+    row = cd.cells[(cd.cells["well"] == well) & (cd.cells["field"] == fld) & (cd.cells["nucleus_id"] == nucleus_id)]
+    if row.empty:
+        return None
+    r = row.iloc[0].copy()
+    cond = cd.cells[(cd.cells["cell_type"] == cell_type) & (cd.cells["treatment"] == treatment)]
+    key, soft, _ = _metrics(cd)
+    for c in [*key, *soft]:
+        r[f"median_{c}"] = float(np.nanmedian(cond[c])) if cond[c].notna().any() else float("nan")
+    return r
 
 
 def display_ranges(crops: dict, opts: FigureOptions) -> dict:
