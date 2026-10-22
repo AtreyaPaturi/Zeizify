@@ -58,13 +58,23 @@ Requires **Python ≥ 3.12**. The zstd-compressed subblocks written by recent ZE
 git clone https://github.com/AtreyaPaturi/Zeizify.git
 cd Zeizify
 
-# create and activate the environment
-python -m venv Zeizify_env
+# create the environment - once (on Windows, `py -3.13` picks the Python version explicitly)
+py -3.13 -m venv Zeizify_env          # Windows
+# python3 -m venv Zeizify_env         # macOS / Linux
+
+# activate it - every new terminal
 Zeizify_env\Scripts\activate          # Windows
 # source Zeizify_env/bin/activate     # macOS / Linux
 
 pip install -e .                      # or, for the exact tested versions: pip install -r requirements.txt && pip install -e .
 ```
+
+Create the environment only once. Re-running `venv` on an existing environment with a different Python
+version (e.g. after installing a newer Python, `python` may now mean 3.14) swaps its interpreter, and
+packages built for the old version fail to load, e.g. *"Importing the numpy C-extensions failed ...
+cp313 ... python 'cpython-314'"*. To repair it, re-run `venv` with the original version
+(`py -3.13 -m venv Zeizify_env`): the installed packages are kept. Check the version with
+`Zeizify_env\Scripts\python --version`.
 
 On Linux, tkinter may need to be installed separately (e.g. `sudo apt install python3-tk`).
 
