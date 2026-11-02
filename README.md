@@ -209,8 +209,8 @@ zeizify analyze out/ --fixed-threshold AF594        # one spot brightness floor 
 ```
 
 1. **Nuclei** are segmented from DAPI with Cellpose (or classical threshold + watershed). Edge-touching
-   nuclei are removed, and condensed (mitotic / apoptotic), dim or saturated nuclei are flagged and left out of
-   statistics.
+   nuclei are removed. Every other nucleus is counted whatever its DAPI intensity; only nuclei with saturated
+   signal are flagged and left out of statistics.
 2. **Spots** are detected inside each nucleus per channel: top-hat background removal, a per-nucleus threshold
    with a noise floor, and a size window in µm. For a stain whose bodies disappear under a treatment (e.g.
    SUMO2/3 after a SUMOylation inhibitor), set its threshold to *Fixed*: one brightness floor for every well,

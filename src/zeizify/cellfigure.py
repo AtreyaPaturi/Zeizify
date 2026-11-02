@@ -11,7 +11,6 @@ Choosing the cells
         nothing fits, and an isolated cell is preferred over a slightly closer match;
       * score: weighted robust distance (|value - median| / IQR) over Pearson's r, spot size,
         intensity CV and mean intensity per channel, nuclear area and DAPI ratio;
-      * interphase: mean DAPI 0.75-1.25 x the field median (not condensed, not dim);
       * geometry: the whole nucleus inside the crop, few other nuclei in it, and at least one
         signal channel >= 3 x brighter inside the nucleus than outside (rejects rounded mitotic
         cells whose signal fills the cell).
@@ -156,7 +155,7 @@ def _metrics(cd: CellData) -> tuple[dict[str, float], dict[str, float], list[str
         key["n_double"] = 1.0
     sizes = [f"{c}_spot_mean_area_halfmax_um2" for c in cd.signal if f"{c}_spot_mean_area_halfmax_um2" in cols]
     soft = {"pearson": 3.0, **{s: 2.0 for s in sizes}, **{f"{c}_cv": 1.0 for c in cd.signal},
-            **{f"{c}_mean_bgsub": 1.0 for c in cd.signal}, "area_um2": 0.5, "dapi_ratio": 0.5}
+            **{f"{c}_mean_bgsub": 1.0 for c in cd.signal}, "area_um2": 0.5}
     soft = {k: w for k, w in soft.items() if k in cols}
     return key, soft, sizes
 
@@ -240,7 +239,7 @@ def rank_candidates(cd: CellData, cell_type: str, treatment: str, crop_w_um: flo
            or 1.0 for c in soft}
     px = cd.ds.px_um
     h, w = int(round(crop_h_um / px)), int(round(crop_w_um / px))
-    base = cond[cond["dapi_ratio"].between(0.75, 1.25)] if "dapi_ratio" in cond else cond
+    base = cond
     score = np.zeros(len(base))
     for c, wt in soft.items():
         score += wt * np.nan_to_num(np.abs(base[c].to_numpy(dtype=float) - meds[c]) / iqr[c], nan=3.0)

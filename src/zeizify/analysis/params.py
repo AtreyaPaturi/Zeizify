@@ -22,9 +22,8 @@ class AnalysisParams:
     use_gpu: bool = True  # Cellpose only
 
     # --- nucleus quality control (flagged nuclei are kept in tables, excluded from statistics) -----
-    qc_dapi_low: float = 0.5  # mean DAPI below this x field median -> flagged (out of focus / debris)
-    qc_dapi_high: float = 1.6  # above this x field median -> flagged (mitotic / apoptotic, condensed)
-    qc_max_saturated_frac: float = 0.01  # > 1 % saturated pixels in any channel -> flagged
+    # Every segmented nucleus is analysed whatever its DAPI intensity; only saturation flags a nucleus.
+    qc_max_saturated_frac: float = 0.01  # > 1 % saturated pixels in a measured signal channel -> flagged
 
     # --- spots (speckles / nuclear bodies) ----------------------------------------------------------
     spot_min_diameter_um: float = 0.25

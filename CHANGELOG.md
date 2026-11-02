@@ -3,6 +3,16 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.11.0] - 2026-11-02
+
+### Changed
+- **Analyze no longer filters nuclei by DAPI intensity.** The flags for dim (< 0.5 × field median) and bright,
+  condensed (> 1.6 ×) nuclei are removed: every segmented nucleus is counted. `dapi_ratio` is still reported.
+  The `qc_dapi_low` / `qc_dapi_high` parameters, the *Flag nuclei by DAPI* setting and `--dapi-qc` are gone.
+- Only saturation flags a nucleus, now checked in the measured signal channels only, not in DAPI.
+- Figures: the cell picker no longer filters or scores cells by DAPI intensity, and no longer warns about
+  condensed DAPI.
+
 ## [1.10.0] - 2026-10-22
 
 ### Added

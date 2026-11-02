@@ -100,12 +100,6 @@ class AnalyzePage(ctk.CTkFrame):
         r = _row(c, "Typical nucleus diameter (µm)")
         self.diam = _entry(r, d.nucleus_diameter_um)
         self.diam.pack(side="left")
-        r = _row(c, "Flag nuclei by DAPI (× field median)", "dim / condensed (mitotic, apoptotic) nuclei are excluded from stats")
-        self.qlo, self.qhi = _entry(r, d.qc_dapi_low, 55), _entry(r, d.qc_dapi_high, 55)
-        ctk.CTkLabel(r, text="below", font=T.font(11), text_color=T.MUTED).pack(side="left", padx=(0, 4))
-        self.qlo.pack(side="left")
-        ctk.CTkLabel(r, text="or above", font=T.font(11), text_color=T.MUTED).pack(side="left", padx=6)
-        self.qhi.pack(side="left")
         r = _row(c, "")
         self.border = _switch(r, "Exclude nuclei touching the image edge", d.exclude_border_nuclei)
         self.border.pack(side="left")
@@ -271,7 +265,6 @@ class AnalyzePage(ctk.CTkFrame):
             return AnalysisParams(
                 nucleus_method=self.method.get().lower(), nucleus_diameter_um=float(self.diam.get()),
                 exclude_border_nuclei=bool(self.border.get()), use_gpu=bool(self.gpu.get()),
-                qc_dapi_low=float(self.qlo.get()), qc_dapi_high=float(self.qhi.get()),
                 spot_channels=[c for c, cb in self.chan_checks.items() if cb.get()],
                 spot_min_diameter_um=float(self.smin.get()), spot_max_diameter_um=float(self.smax.get()),
                 spot_sensitivity=round(float(self.sens.get()), 1), spot_declump=bool(self.declump.get()),

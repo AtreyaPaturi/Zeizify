@@ -116,8 +116,6 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--fixed-threshold", action="append", default=[], metavar="CHANNEL[=VALUE]",
                    help="one spot brightness floor for every well in CHANNEL (repeatable); VALUE in top-hat "
                         "intensity, omitted = automatic. For stains whose bodies vanish in some conditions")
-    a.add_argument("--dapi-qc", type=float, nargs=2, default=[d.qc_dapi_low, d.qc_dapi_high], metavar=("LOW", "HIGH"),
-                   help="flag nuclei whose mean DAPI is outside LOW..HIGH x the field median")
     a.add_argument("--randomizations", type=int, default=d.coloc_randomizations,
                    help="Costes significance randomizations per nucleus (0 = off)")
     a.add_argument("--replicate-column", default="", help="plate-map column defining replicates (default: Replicate, else well)")
@@ -224,7 +222,7 @@ def _analyze(args) -> int:
         exclude_border_nuclei=not args.keep_border_nuclei, use_gpu=not args.cpu,
         spot_min_diameter_um=args.spot_diameter[0], spot_max_diameter_um=args.spot_diameter[1],
         spot_sensitivity=args.sensitivity, spot_declump=not args.no_declump,
-        qc_dapi_low=args.dapi_qc[0], qc_dapi_high=args.dapi_qc[1], coloc_randomizations=args.randomizations,
+        coloc_randomizations=args.randomizations,
         replicate_column=args.replicate_column, workers=args.workers, qc_overlays=not args.no_qc,
         treatment_order=_csv(args.treatment_order), cell_type_order=_csv(args.cell_type_order),
         spot_fixed_threshold=_fixed(args.fixed_threshold))

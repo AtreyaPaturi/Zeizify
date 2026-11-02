@@ -195,7 +195,7 @@ def test_run_analysis_end_to_end(tmp_path):
     assert any("8 cached, 0 to segment" in ln for ln in lines)
 
 
-def test_mitotic_like_nucleus_is_flagged(tmp_path):
+def test_dapi_intensity_does_not_exclude_nuclei(tmp_path):
     from zeizify.analysis.io import load_dataset
     from zeizify.analysis.measure import measure_field
 
@@ -208,8 +208,8 @@ def test_mitotic_like_nucleus_is_flagged(tmp_path):
     tifffile.imwrite(ds.fields[0].channels["DAPI"], dapi)
     nuc = segment_nuclei(dapi, P, PX, "classical")
     r = measure_field(ds.fields[0], nuc, "DAPI", ["AF488", "AF594"], P, PX)
-    flagged = [n for n in r.nuclei if not n["qc_pass"]]
-    assert len(flagged) == 1 and "bright DAPI" in flagged[0]["qc_reason"]
+    assert len(r.nuclei) == 9 and all(n["qc_pass"] for n in r.nuclei)  # 3x brighter DAPI is still counted
+    assert max(n["dapi_ratio"] for n in r.nuclei) > 2  # reported, not used
 
 
 def test_treatment_and_cell_type_order_follow_plate_map():

@@ -136,9 +136,9 @@ HELP: dict[str, dict] = {
                 "Set the typical nucleus diameter in µm - it sets the scale for both methods and the size window "
                 "(debris and clumps are rejected).",
                 "Nuclei touching the image edge are excluded (incomplete).",
-                "Nuclei much brighter in DAPI than the field median (condensed: mitotic / apoptotic) or dimmer "
-                "(out of focus, debris), or with saturated pixels, are flagged: red in the overlay, kept in "
-                "nuclei.csv with qc_pass = False, and left out of the statistics.",
+                "Every segmented nucleus is counted, whatever its DAPI intensity. Only nuclei with saturated "
+                "pixels in a measured channel are flagged: red in the overlay, kept in nuclei.csv with "
+                "qc_pass = False, and left out of the statistics.",
                 "Nuclear masks are cached: changing only spot or colocalization settings re-runs in seconds.",
             ]),
             ("Speckles / nuclear bodies", [
@@ -209,15 +209,14 @@ HELP: dict[str, dict] = {
                 "For each condition the cells are ranked by how closely they match that condition's medians: spot "
                 "counts per channel, double-positive spots, Pearson's r and spot size must be close; intensity, CV "
                 "and nuclear size break ties.",
-                "Only interphase nuclei are used (not condensed or dim in DAPI), the whole nucleus must fit in the "
-                "crop, isolated cells are preferred, and the signal must sit in the nucleus (rounded mitotic cells "
-                "are skipped).",
+                "The whole nucleus must fit in the crop, isolated cells are preferred, and the signal must sit in "
+                "the nucleus (cells whose signal fills the whole cell are skipped). DAPI intensity is not used.",
                 "Each condition has a ranked list (#1 = automatic). Pick another entry to swap the cell - the "
                 "thumbnail and the values vs the condition median update. cells.csv records every choice.",
                 "Choose on image… shows the whole field: step through the condition's fields (◀ ▶), switch the "
                 "view (merge or single channels), and click any nucleus. Its values vs the condition median, the "
-                "crop box and warnings (condensed DAPI, crop off the image) appear; Use this cell puts it in the "
-                "figure. Outlines: white = analysed, red = flagged by QC (cannot be used), yellow = chosen; "
+                "crop box and a warning if the crop runs off the image appear; Use this cell puts it in the "
+                "figure. Outlines: white = analysed, red = flagged by QC for saturation (cannot be used), yellow = chosen; "
                 "#1, #2 ... mark the ranked suggestions.",
             ]),
             ("Layout", [

@@ -28,11 +28,11 @@ With both methods, nuclei are then filtered by a size window (0.25–4 × the ty
 touching the image border are removed, as in the Aktas lab speckle workflow (*Cell* 2026). Masks are cached
 and reused while nuclear settings are unchanged.
 
-**Nucleus QC.** A nucleus is flagged (`qc_pass = False`) when its mean DAPI intensity is < 0.5 × or > 1.6 ×
-the median of its field, or when > 1 % of its pixels are saturated in any channel. The first case catches
-out-of-focus nuclei and debris; the second catches condensed mitotic or apoptotic nuclei. Flagged nuclei stay
-in `nuclei.csv` and are excluded from summaries and statistics. The 1.6 default was set on RPE1 images, where
-mitotic and post-mitotic nuclei measured 1.88–1.94 × and interphase nuclei ≤ 1.36 ×.
+**Nucleus QC.** Every segmented nucleus within the size window is analysed, whatever its DAPI intensity:
+DAPI is used only to find the nuclei. `dapi_ratio`, a nucleus's mean DAPI over the median of its field, is
+reported in `nuclei.csv` but not used. A nucleus is flagged (`qc_pass = False`) only when > 1 % of its pixels
+are saturated in a measured signal channel, because its intensities would then be clipped. Flagged nuclei
+stay in `nuclei.csv` and are excluded from summaries and statistics.
 
 ## 2. Spot (speckle / body) detection
 

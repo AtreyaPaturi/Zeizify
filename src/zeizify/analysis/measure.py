@@ -18,9 +18,10 @@ Per nucleus and channel (prefix "<channel>_"):
   spot_mean_ecc, spot_mean_solidity, spot_mean_intensity
                                spot counts, sizes and shapes (Alexander 2024; Aktas lab 2026)
 
-Nucleus QC: nuclei whose mean DAPI is far from the field's median (condensed mitotic/apoptotic
-or dim out-of-focus nuclei) or that contain saturated pixels are flagged (qc_pass = False). They
-stay in the tables and are excluded from the statistics.
+Nucleus QC: every segmented nucleus is analysed whatever its DAPI intensity (dapi_ratio, its mean
+DAPI / the field median, is reported but not used). Only nuclei with > qc_max_saturated_frac saturated
+pixels in a measured signal channel are flagged (qc_pass = False); they stay in the tables and are
+excluded from the statistics.
 """
 
 from __future__ import annotations
@@ -126,13 +127,11 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
              "area_um2": r.area * px2, "eccentricity": r.eccentricity, "solidity": r.solidity,
              "dapi_mean": float(dmean), "dapi_integrated": float(dmean * r.area),
              "dapi_ratio": float(dmean / dapi_med) if dapi_med else float("nan")}
-        sat = max(float((imgs[c][sl][mask] >= ceiling[c]).mean()) for c in imgs)
+        # saturation of the measured (signal) channels only - the nuclear stain is used for segmentation, and
+        # its intensity never excludes a nucleus
+        sat = max((float((imgs[c][sl][mask] >= ceiling[c]).mean()) for c in spot_channels), default=0.0)
         n["saturated_frac"] = sat
         reasons = []
-        if n["dapi_ratio"] < params.qc_dapi_low:
-            reasons.append("dim DAPI")
-        if n["dapi_ratio"] > params.qc_dapi_high:
-            reasons.append("bright DAPI (mitotic/apoptotic?)")
         if sat > params.qc_max_saturated_frac:
             reasons.append("saturated")
         n["qc_pass"] = not reasons

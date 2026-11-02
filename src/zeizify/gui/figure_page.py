@@ -250,13 +250,11 @@ class FieldPicker(ctk.CTkToplevel):
             return
         r = cell_summary(self.cd, *self.key, f.well, f.field, self.sel)
         if r is None:
-            self.info.configure(text=f"{f.well} {f.field} #{self.sel}: flagged by QC (condensed, dim or saturated) or "
-                                     "not analysed - choose another nucleus.", text_color=T.WARNING)
+            self.info.configure(text=f"{f.well} {f.field} #{self.sel}: flagged by QC (saturated) or not "
+                                     "analysed - choose another nucleus.", text_color=T.WARNING)
             self.use_btn.configure(state="disabled")
             return
         warn = []
-        if r.get("dapi_ratio", 1.0) > 1.25 or r.get("dapi_ratio", 1.0) < 0.75:
-            warn.append("DAPI suggests a condensed / dim nucleus")
         px = self.cd.ds.px_um
         cy, cx = r["centroid_y_um"] / px, r["centroid_x_um"] / px
         H, W = self.small_mask.shape[0] * self.factor, self.small_mask.shape[1] * self.factor
