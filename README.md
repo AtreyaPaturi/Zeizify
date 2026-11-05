@@ -212,6 +212,9 @@ zeizify analyze out/ --reference "WT,MOCK" --high-percentile 95   # compare ever
 1. **Nuclei** are segmented from DAPI with Cellpose (or classical threshold + watershed). Edge-touching
    nuclei are removed. Every other nucleus is counted whatever its DAPI intensity; only nuclei with saturated
    signal are flagged and left out of statistics.
+   **Speckles, overall signal, or both** (`--quantify`). *Overall signal* measures the mean and total
+   intensity of the nucleus, cytoplasm and whole cell, speckles included, without needing spots. With both,
+   the total is also split into speckle and diffuse signal.
    **Spots in the nucleus, cytoplasm or both.** With cell boundaries, spots can also be counted in the
    cytoplasm. Tick both to get spots per cell in the nucleus, the cytoplasm and the whole cell, with a graph
    of each (`--spots-in both`).

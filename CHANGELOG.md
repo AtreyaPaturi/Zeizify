@@ -3,6 +3,21 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.15.0] - 2026-11-05
+
+### Added
+- **Quantify: speckles, overall signal, or both**: checkboxes on the Analyze page, and `--quantify
+  speckles|signal|both`.
+  - *Overall signal* measures the mean and total (integrated) background-subtracted intensity of the
+    nucleus, cytoplasm and whole cell, speckles included (`<ch>_integrated_bgsub`, `_cyto_integrated_bgsub`,
+    `_cell_integrated_bgsub`).
+  - With both, the nuclear total is split into speckle and diffuse signal (`<ch>_spots_integrated_bgsub`,
+    `<ch>_diffuse_mean_bgsub`; `<ch>_cyto_spots_integrated_bgsub` in the cytoplasm).
+  - With speckles off, no spots are detected (faster), and spot readouts are left out of the statistics and
+    figures. With signal off, intensity readouts are left out.
+- `superplots/<panel>_signal.png`: SuperPlots of the overall signal, with means, totals and the speckle /
+  diffuse split per channel.
+
 ## [1.14.0] - 2026-11-05
 
 ### Added

@@ -145,6 +145,17 @@ class AnalyzePage(ctk.CTkFrame):
         section_title(c, "Speckles / nuclear bodies",
                       "Detected inside each nucleus: white top-hat background removal, per-nucleus threshold with a "
                       "noise floor, size window").pack(fill="x", padx=18, pady=(14, 6))
+        r = _row(c, "Quantify", "Speckles: spot detection and counts · Overall signal: mean and total intensity of "
+                                "nucleus / cytoplasm / cell, speckle signal included")
+        self.q_speckles = ctk.CTkCheckBox(r, text="Speckles", font=T.font(12), text_color=T.TEXT, checkbox_width=18,
+                                          checkbox_height=18, corner_radius=5, fg_color=T.ACCENT,
+                                          hover_color=T.ACCENT_HOVER, border_color=T.BORDER)
+        self.q_signal = ctk.CTkCheckBox(r, text="Overall signal", font=T.font(12), text_color=T.TEXT, checkbox_width=18,
+                                        checkbox_height=18, corner_radius=5, fg_color=T.ACCENT,
+                                        hover_color=T.ACCENT_HOVER, border_color=T.BORDER)
+        for cb in (self.q_speckles, self.q_signal):
+            cb.select()
+            cb.pack(side="left", padx=(0, 14))
         self.chan_row = _row(c, "Channels")
         self.chan_checks: dict[str, ctk.CTkCheckBox] = {}
         self.thr_box = ctk.CTkFrame(c, fg_color="transparent")
@@ -343,7 +354,7 @@ class AnalyzePage(ctk.CTkFrame):
                 spot_channels=[c for c, cb in self.chan_checks.items() if cb.get()],
                 spot_min_diameter_um=float(self.smin.get()), spot_max_diameter_um=float(self.smax.get()),
                 spot_sensitivity=round(float(self.sens.get()), 1), spot_declump=bool(self.declump.get()),
-                spot_compartments=self._compartments(),
+                spot_compartments=self._compartments(), quantify=self._quantify(),
                 coloc_randomizations=int(self.rand.get()), replicate_column=REPLICATE_CHOICES[self.rep.get()],
                 workers=max(1, int(self.workers.get())), qc_overlays=bool(self.qc.get()),
                 cell_segmentation=self._marker_choice()[0], cell_marker=self._marker_choice()[1],
@@ -357,6 +368,12 @@ class AnalyzePage(ctk.CTkFrame):
         except ValueError as exc:
             self.app.toast(f"Check the settings: {exc}", kind="warning")
             return None
+
+    def _quantify(self) -> list[str]:
+        out = [name for name, cb in (("speckles", self.q_speckles), ("signal", self.q_signal)) if cb.get()]
+        if not out:
+            raise ValueError("tick Speckles and/or Overall signal under 'Quantify'")
+        return out
 
     def _compartments(self) -> list[str]:
         out = [name for name, cb in (("nucleus", self.in_nucleus), ("cytoplasm", self.in_cyto)) if cb.get()]

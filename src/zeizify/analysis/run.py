@@ -302,7 +302,11 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
     ready = [f for f in todo if _mask_path(masks, f).exists()]
 
     # experiment-wide spot floors: pool the per-nucleus spot candidates of every field first
-    auto = [c for c, v in params.spot_fixed_threshold.items() if c in spot_channels and not (v and v > 0)]
+    do_spots = "speckles" in (params.quantify or ["speckles", "signal"])
+    do_signal = "signal" in (params.quantify or ["speckles", "signal"])
+    log("Quantifying: " + " and ".join(x for x, on in (("speckles", do_spots), ("overall signal", do_signal)) if on) + ".")
+    auto = [c for c, v in params.spot_fixed_threshold.items()
+            if c in spot_channels and not (v and v > 0)] if do_spots else []
     candidates: dict[str, list] = {c: [] for c in auto}
     tagged: list[pd.DataFrame] = []  # the same, with treatment / cell type, for the check plot
     if auto:
@@ -325,7 +329,7 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
         if stop.is_set():
             raise InterruptedError("Stopped - nuclear masks are cached; run again to finish.")
     candidates = {c: (np.concatenate(v) if v else np.zeros(0)) for c, v in candidates.items()}
-    spot_floors = resolve_spot_floors(params, spot_channels, candidates)
+    spot_floors = resolve_spot_floors(params, spot_channels, candidates) if do_spots else {}
     for c, d in spot_floors.items():
         sep = f", separability {d['separability']:.2f}" if np.isfinite(d["separability"]) else ""
         log(f"  {c}: spot brightness floor {d['floor']:.0f} ({d['mode']}{sep})")
@@ -372,7 +376,7 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
             nuclei[c] = nuclei[c].fillna("")
     # reference condition (e.g. WT · MOCK) and "high" cells relative to it
     reference, high_info = ("", ""), pd.DataFrame()
-    if len(nuclei):
+    if len(nuclei) and do_signal:
         o0 = default_orders(nuclei, params.treatment_order, params.cell_type_order)
         reference = resolve_reference(o0, params.reference_cell_type, params.reference_treatment)
         nuclei, high_info = add_high_flags(nuclei, spot_channels, reference, params.high_percentile)
@@ -385,6 +389,8 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
     for df, name in ((nuclei, "nuclei"), (spots, "spots"), (coloc, "colocalization"), (fields_df, "fields")):
         df.to_csv(adir / f"{name}.csv", index=False)
     try:
+        if not do_spots:
+            raise RuntimeError("speckles not quantified")
         from .stats import write_spot_brightness_plot
 
         write_spot_brightness_plot(spots, pd.concat(tagged, ignore_index=True) if tagged else None, spot_floors,
@@ -398,7 +404,7 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
         for c in ("cell_type", "treatment", "antibody", "replicate"):
             if c in df:
                 df[c] = df[c].fillna("")
-    long = long_table(nuclei, coloc, spot_channels) if len(nuclei) else pd.DataFrame()
+    long = long_table(nuclei, coloc, spot_channels, params.quantify) if len(nuclei) else pd.DataFrame()
     rep = replicate_summary(long) if len(long) else pd.DataFrame()
     cond = condition_summary(rep) if len(rep) else pd.DataFrame()
     orders = default_orders(long, params.treatment_order, params.cell_type_order) if len(long) else {}
@@ -406,6 +412,8 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
         log("Order: treatments " + ", ".join(orders["treatment"]) + "; cell types "
             + ", ".join(c or "-" for c in orders["cell_type"]))
     if orders:
+        if not reference[0] and not reference[1]:
+            reference = resolve_reference(orders, params.reference_cell_type, params.reference_treatment)
         orders["reference"] = reference
     omni, pairs = run_tests(rep, long, orders) if len(rep) else (pd.DataFrame(), pd.DataFrame())
     rep.to_csv(adir / "replicate_summary.csv", index=False)

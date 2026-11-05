@@ -173,8 +173,8 @@ def test_run_analysis_end_to_end(tmp_path):
         assert (adir / f"{name}.csv").exists()
     assert (adir / "analysis_manifest.json").exists() and res.overview_plots and res.overview_plots[0].exists()
     names = [p.name.split("_", 2)[-1] if p.name.startswith("X_Y_") else p.name for p in res.overview_plots]
-    assert names[:5] == ["spots_per_nucleus.png", "single_double_positive.png", "spot_categories.png",
-                         "high_cells.png", "spot_area_per_nucleus.png"]
+    assert names[:6] == ["spots_per_nucleus.png", "single_double_positive.png", "spot_categories.png",
+                         "signal.png", "high_cells.png", "spot_area_per_nucleus.png"]
     assert all(p.exists() for p in res.overview_plots)
     high = pd.read_csv(adir / "high_thresholds.csv")
     assert set(high["reference"]) == {"WT · Mock"} and (high["percentile"] == 95).all()
@@ -377,3 +377,57 @@ def test_every_condition_compared_with_the_reference():
     assert set(vr["group_a"]) == {"WT · Mock"}
     assert set(vr["group_b"]) == {"KO · Mock", "WT · Drug", "KO · Drug"}
     assert vr["vs_control"].all() and (vr["diff_replicate_means"] > 50).all()
+
+
+def test_overall_signal_includes_and_splits_the_speckle_signal(tmp_path):
+    from zeizify.analysis.io import load_dataset
+    from zeizify.analysis.measure import measure_field
+
+    out = tmp_path / "o"
+    write_zeizify_output(out, [{"well": "A1", "field": "P1", "treatment": "Mock", "seed": 3, "shared": 0.5}])
+    fi = load_dataset(out).fields[0]
+    import tifffile
+
+    dapi = tifffile.imread(fi.channels["DAPI"])
+    nuc = segment_nuclei(dapi, P, PX, "classical")
+    both = measure_field(fi, nuc, "DAPI", ["AF488"], P, PX)
+    df = pd.DataFrame(both.nuclei)
+    area_px = df["area_um2"] / PX ** 2
+    # total = mean x area; speckle part + diffuse part = total
+    assert np.allclose(df["AF488_integrated_bgsub"], df["AF488_mean_bgsub"] * area_px, rtol=1e-6)
+    spot_px = df["AF488_spots_area_um2"] / PX ** 2
+    assert np.allclose(df["AF488_spots_integrated_bgsub"] + df["AF488_diffuse_mean_bgsub"] * (area_px - spot_px),
+                       df["AF488_integrated_bgsub"], rtol=1e-6)
+    assert (df["AF488_spots_integrated_bgsub"] > 0).all()
+    # signal only: no spot detection, the same overall signal
+    sig = AnalysisParams(**{**P.to_dict(), "quantify": ["signal"]})
+    r = measure_field(fi, nuc, "DAPI", ["AF488"], sig, PX)
+    d2 = pd.DataFrame(r.nuclei)
+    assert not r.spots and d2["AF488_spots_n"].isna().all()
+    assert np.allclose(d2["AF488_integrated_bgsub"], df["AF488_integrated_bgsub"])
+    assert "AF488_spots_integrated_bgsub" not in d2 or d2["AF488_spots_integrated_bgsub"].isna().all()
+
+
+def test_quantify_choice_controls_the_statistics():
+    from zeizify.analysis.stats import long_table
+
+    n = _toy_nuclei().assign(AF488_spots_n=3.0)
+    m_sig = set(long_table(n, pd.DataFrame(), ["AF488"], ["signal"])["metric"])
+    m_spk = set(long_table(n, pd.DataFrame(), ["AF488"], ["speckles"])["metric"])
+    assert "mean_bgsub" in m_sig and "mean_bgsub" not in m_spk and "spots_n" in m_spk
+
+
+def test_signal_only_run(tmp_path):
+    from zeizify.analysis.run import run_analysis
+
+    out = tmp_path / "o"
+    write_zeizify_output(out, [{"well": f"A{i}", "field": "P1", "treatment": t, "seed": i, "shared": 0.5}
+                               for i, t in ((1, "Mock"), (2, "Drug"))])
+    res = run_analysis(out, AnalysisParams(nucleus_method="classical", workers=1, spot_min_diameter_um=0.5,
+                                           quantify=["signal"], qc_overlays=False), log=lambda s: None)
+    assert res.spots.empty  # no spot detection
+    names = {p.name for p in res.overview_plots}
+    assert any(n.endswith("_signal.png") for n in names)
+    assert not any(n.endswith("_spots_per_nucleus.png") for n in names)
+    metrics = set(pd.read_csv(res.analysis_dir / "replicate_summary.csv")["metric"])
+    assert {"mean_bgsub", "integrated_bgsub"} <= metrics and "spots_n" not in metrics

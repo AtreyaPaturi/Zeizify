@@ -41,6 +41,12 @@ CHANNEL_METRICS = {
     "mean_bgsub": "mean nuclear intensity (bg-subtracted)",
     "cyto_mean_bgsub": "mean cytoplasmic intensity (bg-subtracted)",
     "cell_mean_bgsub": "mean whole-cell intensity (bg-subtracted)",
+    "integrated_bgsub": "total nuclear signal (bg-subtracted, speckles included)",
+    "cyto_integrated_bgsub": "total cytoplasmic signal (bg-subtracted, speckles included)",
+    "cell_integrated_bgsub": "total whole-cell signal (bg-subtracted, speckles included)",
+    "spots_integrated_bgsub": "nuclear signal in speckles (total)",
+    "cyto_spots_integrated_bgsub": "cytoplasmic signal in speckles (total)",
+    "diffuse_mean_bgsub": "mean nuclear signal outside speckles",
     "high_nucleus": "% cells with high nuclear intensity",
     "high_cytoplasm": "% cells with high cytoplasmic intensity",
     "high_cell": "% cells with high whole-cell intensity",
@@ -71,6 +77,10 @@ SUPERPLOT_CHANNEL = ["mean_bgsub", "cyto_mean_bgsub", "cell_mean_bgsub", "spots_
 HIGH_SOURCES = {"mean_bgsub": ("high_nucleus", "nucleus"), "cyto_mean_bgsub": ("high_cytoplasm", "cytoplasm"),
                 "cell_mean_bgsub": ("high_cell", "whole cell")}
 FRACTION_METRICS = {m for m, _ in HIGH_SOURCES.values()}
+# readouts of the overall signal; left out of the statistics when "signal" is not quantified
+SIGNAL_METRICS = {"mean_bgsub", "cyto_mean_bgsub", "cell_mean_bgsub", "nc_ratio", "integrated_bgsub",
+                  "cyto_integrated_bgsub", "cell_integrated_bgsub", "spots_integrated_bgsub",
+                  "cyto_spots_integrated_bgsub", "diffuse_mean_bgsub", "cv", *FRACTION_METRICS}
 SUPERPLOT_COLOC = ["n_double", "n_a_only", "n_b_only", "pearson", "tm1", "tm2", "frac_a_overlap"]
 WILDTYPE_KEYWORDS = ("wt", "wildtype", "wild", "parental", "control", "ctrl")
 REPLICATE_COLORS = ["#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#0072B2", "#D55E00", "#F0E442", "#999999"]  # Okabe-Ito
@@ -153,7 +163,8 @@ def default_orders(long: pd.DataFrame, treatments=(), cell_types=()) -> dict:
             "cell_type": level_order(long, "cell_type", cell_types, is_wildtype)}
 
 
-def long_table(nuclei: pd.DataFrame, coloc: pd.DataFrame, channels: list[str]) -> pd.DataFrame:
+def long_table(nuclei: pd.DataFrame, coloc: pd.DataFrame, channels: list[str],
+               quantify: "list[str] | None" = None) -> pd.DataFrame:
     """One row per nucleus x metric: antibody, cell_type, treatment, replicate, well, measure,
     metric, feature (channel or pair), stain, value. QC-failed nuclei are dropped."""
     ids = ["antibody", "cell_type", "treatment", "replicate", "well"]
@@ -183,6 +194,8 @@ def long_table(nuclei: pd.DataFrame, coloc: pd.DataFrame, channels: list[str]) -
     # empty values (cell metrics where no cell was segmented, nuclear spots when not quantified, ...) carry no
     # information: drop them, and a zero cytoplasm area (no cell)
     out = out[out["value"].notna() & ~((out["metric"] == "cyto_area_um2") & (out["value"] == 0))]
+    if quantify is not None and "signal" not in quantify:
+        out = out[~out["metric"].isin(SIGNAL_METRICS | {"pearson", "spearman", "icq", "tm1", "tm2"})]
     return out
 
 
@@ -715,6 +728,58 @@ def _category_figure(tab: pd.DataFrame, t_order: list, ct_order: list, header: s
     plt.close(fig)
 
 
+SIGNAL_GROUPS = [
+    ("mean intensity", [("mean_bgsub", "nucleus"), ("cyto_mean_bgsub", "cytoplasm"), ("cell_mean_bgsub", "whole cell"),
+                        ("nc_ratio", "nucleus / cytoplasm")]),
+    ("total signal", [("integrated_bgsub", "nucleus"), ("cyto_integrated_bgsub", "cytoplasm"),
+                      ("cell_integrated_bgsub", "whole cell")]),
+    ("speckles vs diffuse", [("spots_integrated_bgsub", "in nuclear speckles (total)"),
+                             ("diffuse_mean_bgsub", "nucleus outside speckles (mean)"),
+                             ("frac_in_spots", "fraction of nuclear signal in speckles"),
+                             ("cyto_spots_integrated_bgsub", "in cytoplasmic speckles (total)")]),
+]
+
+
+def _signal_rows(lab: pd.DataFrame) -> list:
+    """(channel, group title, [(metric, label), ...]) for every channel and signal group with data."""
+    out = []
+    have = set(zip(lab["feature"], lab["metric"]))
+    feats = list(dict.fromkeys(lab.loc[lab["metric"] == "mean_bgsub", "feature"]))
+    for f in feats:
+        for title, items in SIGNAL_GROUPS:
+            present = [(m, w) for m, w in items if (f, m) in have]
+            if present and not (title == "speckles vs diffuse" and len(present) < 2):
+                out.append((f, title, present))
+    return out
+
+
+def _signal_figure(lab: pd.DataFrame, rsub: pd.DataFrame, omni: pd.DataFrame, ab, rows: list, t_order: list,
+                   ct_order: list, header: str, width: float, path) -> None:
+    """SuperPlots of the overall signal: one row per channel and group (means, totals, speckle / diffuse)."""
+    import matplotlib.pyplot as plt
+
+    ncol = max(len(items) for _, _, items in rows)
+    fig, axes = plt.subplots(len(rows), ncol, figsize=(ncol * (width + 1.4), 3.9 * len(rows)), squeeze=False)
+    for row_axes, (feat, title, items) in zip(axes, rows):
+        st = ";".join(sorted(set(lab.loc[lab["feature"] == feat, "stain"].astype(str)) - {""})) or feat
+        for i, ax in enumerate(row_axes):
+            if i >= len(items):
+                ax.axis("off")
+                continue
+            m, where = items[i]
+            ls = lab[(lab["metric"] == m) & (lab["feature"] == feat)]
+            rs = rsub[(rsub["metric"] == m) & (rsub["feature"] == feat)]
+            superplot(ax, ls, rs, f"{st} ({feat}) - {title}: {where}", _p_text(omni, ab, m, feat, ct_order), t_order,
+                      ct_order, legend=i == len(items) - 1)
+            ax.set_ylabel(ls["metric_label"].iloc[0] if len(ls) else m, fontsize=8)
+            if m != "nc_ratio":
+                ax.set_ylim(bottom=0)
+    fig.suptitle(f"{header} - overall signal (background-subtracted; totals include the speckle signal)", fontsize=11)
+    fig.tight_layout()
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
 def _high_cells_figure(rsub: pd.DataFrame, items: list, t_order: list, ct_order: list, header: str,
                        high_info: "pd.DataFrame | None", path) -> None:
     """100 % stacked bars: % of cells above / below the reference condition's cut-off, per condition; one
@@ -892,6 +957,13 @@ def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, 
             path = out_dir / f"{name}_spots_by_compartment.png"
             fig.savefig(path, dpi=150, bbox_inches="tight")
             plt.close(fig)
+            written.append(path)
+
+        # overall signal: means, totals and (with speckles) the speckle / diffuse split, per channel
+        sig_rows = _signal_rows(lab_all)
+        if sig_rows:
+            path = out_dir / f"{name}_signal.png"
+            _signal_figure(lab_all, rsub, omni, ab, sig_rows, t_order, ct_order, header, width, path)
             written.append(path)
 
         # % high cells per channel and compartment, vs the reference condition's cut-off

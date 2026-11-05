@@ -27,6 +27,13 @@ Per cell (fields with a cell-boundary marker, e.g. F-actin; cell id = nucleus id
   Background is then taken outside the cells (> 1 µm away), so cytoplasmic signal is not counted as
   background.
 
+Overall signal (params.quantify contains "signal"), background-subtracted, speckles included:
+  <channel>_integrated_bgsub, _cyto_integrated_bgsub, _cell_integrated_bgsub   total signal
+  (means: mean_bgsub, cyto_mean_bgsub, cell_mean_bgsub). With speckles quantified too, the nuclear total
+  is split into <channel>_spots_integrated_bgsub (in speckles) and <channel>_diffuse_mean_bgsub (mean
+  outside speckles); likewise <channel>_cyto_spots_integrated_bgsub in the cytoplasm.
+  With "speckles" not selected no spots are detected and every spot column is empty (NaN).
+
 Spots per compartment (params.spot_compartments; cytoplasm needs cell boundaries):
   <channel>_cyto_spots_n, _cyto_spots_area_um2, _cyto_spots_area_frac, _cyto_spot_mean_area_halfmax_um2,
   _cyto_spot_mean_intensity    spots detected in the cytoplasm (per-cell threshold, as in the nucleus)
@@ -105,7 +112,8 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
             away = away_cells
     bg = {c: (float(np.percentile(a[away], 10)) if away.any() else float(np.percentile(a, 1))) for c, a in imgs.items()}
 
-    comps = set(params.spot_compartments or ["nucleus"])
+    do_spots = "speckles" in (params.quantify or ["speckles", "signal"])
+    comps = set(params.spot_compartments or ["nucleus"]) if do_spots else set()
     do_nuc = "nucleus" in comps
     # cytoplasm label image: cell id (= nucleus id) outside every nucleus
     cyto_lab = (np.where(nuclei == 0, cells, 0).astype(np.int32)
@@ -186,11 +194,15 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
                 n[f"{c}_enrichment"] = float("nan")
             tot = float(np.clip(vb, 0, None).sum())
             n[f"{c}_frac_in_spots"] = float(np.clip(vb[in_spot], 0, None).sum() / tot) if tot > 0 else float("nan")
-            if not do_nuc:  # nuclear spots not quantified
+            n[f"{c}_integrated_bgsub"] = float(vb.sum())  # total nuclear signal, speckles included
+            if do_nuc:
+                n[f"{c}_spots_integrated_bgsub"] = float(vb[in_spot].sum())  # the part in speckles
+                n[f"{c}_diffuse_mean_bgsub"] = float(vb[~in_spot].mean()) if (~in_spot).any() else float("nan")
+            else:  # nuclear spots not quantified
                 for k in NUCLEAR_SPOT_KEYS:
                     n[f"{c}_{k}"] = float("nan")
             if cyto_lab is not None:
-                _cyto_spots(n, c, nid, cyto_summary.get((c, nid), []), cyto_px, px2, do_nuc)
+                _cyto_spots(n, c, nid, cyto_summary.get((c, nid), []), cyto_px, px2, do_nuc, bg[c])
         if cells is not None:
             _measure_cell(n, nid, cells, nuclei, imgs, nuclear, bg, px2, cell_slices, cell_marker)
         res.nuclei.append(n)
@@ -253,12 +265,13 @@ def _spot_rows(res, ids: dict, fi, c: str, lab: np.ndarray, th: np.ndarray, regi
         summary.setdefault((c, nid), []).append(row)
 
 
-def _cyto_spots(n: dict, c: str, nid: int, rows: list, cyto_px: np.ndarray, px2: float, do_nuc: bool) -> None:
+def _cyto_spots(n: dict, c: str, nid: int, rows: list, cyto_px: np.ndarray, px2: float, do_nuc: bool,
+                bg: float = 0.0) -> None:
     """Cytoplasmic spot summary of one cell, and the whole-cell total when the nucleus is quantified too."""
     area = int(cyto_px[nid]) if nid < len(cyto_px) else 0
     if area == 0:  # no cytoplasm (no cell, or cut by the image edge)
         for k in ("cyto_spots_n", "cyto_spots_area_um2", "cyto_spots_area_frac", "cyto_spot_mean_area_halfmax_um2",
-                  "cyto_spot_mean_intensity", "cell_spots_n"):
+                  "cyto_spot_mean_intensity", "cell_spots_n", "cyto_spots_integrated_bgsub"):
             n[f"{c}_{k}"] = float("nan")
         return
     spot_area = sum(x["area_um2"] for x in rows)
@@ -268,6 +281,8 @@ def _cyto_spots(n: dict, c: str, nid: int, rows: list, cyto_px: np.ndarray, px2:
     n[f"{c}_cyto_spot_mean_area_halfmax_um2"] = _nan_mean([x["area_halfmax_um2"] for x in rows])
     n[f"{c}_cyto_spot_mean_intensity"] = _nan_mean([x["mean_intensity"] for x in rows])
     n[f"{c}_cell_spots_n"] = (n[f"{c}_spots_n"] + len(rows)) if do_nuc else float("nan")
+    n[f"{c}_cyto_spots_integrated_bgsub"] = float(sum(x["integrated_intensity"] - bg * x["area_um2"] / px2
+                                                      for x in rows))
 
 
 def _measure_cell(n: dict, nid: int, cells: np.ndarray, nuclei: np.ndarray, imgs: dict, nuclear: str, bg: dict,
@@ -294,7 +309,9 @@ def _measure_cell(n: dict, nid: int, cells: np.ndarray, nuclei: np.ndarray, imgs
         n[f"{c}_cyto_mean"] = cm
         n[f"{c}_cyto_mean_bgsub"] = cmb
         n[f"{c}_cyto_integrated"] = float(a[cyto].sum()) if has else float("nan")
+        n[f"{c}_cyto_integrated_bgsub"] = float((a[cyto] - bg[c]).sum()) if has else float("nan")
         n[f"{c}_cell_mean_bgsub"] = float(a[cell].mean()) - bg[c] if has else float("nan")
+        n[f"{c}_cell_integrated_bgsub"] = float((a[cell] - bg[c]).sum()) if has else float("nan")
         n[f"{c}_nc_ratio"] = nmb / cmb if has and cmb > 0 else float("nan")
 
 

@@ -162,6 +162,27 @@ point-spread function rather than the body's physical size.
   These are reported alongside counts. CV is not, to our knowledge, a published, validated speckle-dispersal
   metric; treat it as exploratory.
 
+## 3b. What is quantified: speckles, overall signal, or both
+
+`quantify` (*Quantify* checkboxes on the Analyze page; `--quantify`):
+- **Speckles**: spot detection and everything derived from spots (counts, sizes, shapes, enrichment,
+  single / double-positive spots, object overlap). Without it no spots are detected, and the run is
+  faster.
+- **Overall signal**: the background-subtracted intensity of each compartment, speckles included:
+  - mean: `<ch>_mean_bgsub`, `_cyto_mean_bgsub`, `_cell_mean_bgsub`;
+  - total (integrated): `<ch>_integrated_bgsub`, `_cyto_integrated_bgsub`, `_cell_integrated_bgsub`;
+  - the nuclear / cytoplasmic ratio, intensity CV, pixel colocalization (Pearson, Manders, ICQ) and
+    "high" cells.
+- **Both**: the nuclear total is also split into the signal in speckles (`<ch>_spots_integrated_bgsub`)
+  and the diffuse signal outside them (`<ch>_diffuse_mean_bgsub`); speckle total + diffuse mean × diffuse
+  area = nuclear total. Likewise `<ch>_cyto_spots_integrated_bgsub` in the cytoplasm.
+
+Readouts of an unselected kind are left out of the statistics and figures. `<panel>_signal.png` shows the
+overall signal as SuperPlots, one row per channel:
+- means (nucleus, cytoplasm, whole cell, N/C);
+- totals (nucleus, cytoplasm, whole cell);
+- with speckles, the speckle / diffuse split.
+
 ## 4. Colocalization (per nucleus, every pair of analysed channels)
 
 **Pixel-based**, on background-subtracted intensities (clipped at 0) inside the nucleus. Definitions match

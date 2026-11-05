@@ -155,6 +155,16 @@ HELP: dict[str, dict] = {
                 "<channel>_nc_ratio). Cell outlines are cyan in the Preview and QC overlays. Cell masks are "
                 "cached like nuclear masks.",
             ]),
+            ("Speckles or overall signal", [
+                "Quantify: Speckles = spot detection and everything about spots (counts, sizes, overlap). Overall "
+                "signal = the mean and total (integrated) intensity of the nucleus, cytoplasm and whole cell, "
+                "background-subtracted, speckle signal included; plus the nuclear / cytoplasmic ratio, intensity "
+                "CV, pixel colocalization and 'high' cells.",
+                "Tick only Overall signal when the staining is not punctate - no spots are detected (faster).",
+                "With both ticked, the nuclear total is also split into the signal in speckles and the diffuse "
+                "signal outside them (<channel>_spots_integrated_bgsub, <channel>_diffuse_mean_bgsub).",
+                "Graphs: <panel>_signal.png (means, totals, speckle / diffuse split).",
+            ]),
             ("Speckles / nuclear bodies", [
                 "Spot diameter: the size window in µm. PML bodies are ~0.3-1 µm, nuclear speckles ~0.5-3 µm.",
                 "Noise floor: a spot must rise this many robust standard deviations (MADs) above the "
