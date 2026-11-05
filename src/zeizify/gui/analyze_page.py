@@ -21,6 +21,8 @@ REPLICATE_CHOICES = {"Auto (plate-map Replicate column, else well)": "", "Well":
 
 
 THRESHOLD_MODES = ["Per nucleus", "Fixed - automatic", "Fixed - value"]
+CELL_MARKER_CHOICES = {"Auto (from the stain names)": ("auto", ""), "Off": ("off", "")}  # + one entry per channel
+CELL_METHODS = {"Auto": "auto", "Cellpose-SAM": "cellpose", "Classical": "classical"}
 
 
 def _csv(text: str) -> list[str]:
@@ -106,6 +108,36 @@ class AnalyzePage(ctk.CTkFrame):
         self.gpu = _switch(r, "Use GPU (Cellpose)", d.use_gpu)
         self.gpu.pack(side="left", padx=20)
         ctk.CTkFrame(c, fg_color="transparent", height=8).pack()
+
+        # cells / cytoplasm
+        c = Card(self.body)
+        c.pack(fill="x", pady=(0, 12))
+        section_title(c, "Cells and cytoplasm",
+                      "Whole-cell boundaries from a cell-body / edge stain such as F-actin, for wells that have one. "
+                      "Cytoplasm = cell minus nucleus; adds cytoplasmic intensity and nuclear / cytoplasmic ratios."
+                      ).pack(fill="x", padx=18, pady=(14, 6))
+        r = _row(c, "Boundary stain", "Auto: the channel whose stain is F-actin, phalloidin, CellMask, tubulin or WGA")
+        self.cell_marker = ctk.CTkOptionMenu(r, values=list(CELL_MARKER_CHOICES), width=260, height=30, corner_radius=8,
+                                             font=T.font(12), fg_color=T.SURFACE_ALT, button_color=T.SURFACE_ALT,
+                                             button_hover_color=T.BORDER, text_color=T.TEXT, dropdown_font=T.font(12))
+        self.cell_marker.set(next(iter(CELL_MARKER_CHOICES)))
+        self.cell_marker.pack(side="left")
+        r = _row(c, "Method", "Cellpose-SAM separates touching cells; Classical grows each nucleus outwards")
+        self.cell_method = ctk.CTkSegmentedButton(r, values=list(CELL_METHODS), font=T.font(12),
+                                                  selected_color=T.ACCENT, selected_hover_color=T.ACCENT_HOVER,
+                                                  fg_color=T.SURFACE_ALT, unselected_color=T.SURFACE_ALT,
+                                                  unselected_hover_color=T.BORDER, text_color=T.TEXT)
+        self.cell_method.set(next(iter(CELL_METHODS)))
+        self.cell_method.pack(side="left")
+        r = _row(c, "Typical cell diameter (µm)", "sets the scale for both methods")
+        self.cell_diam = _entry(r, d.cell_diameter_um)
+        self.cell_diam.pack(side="left")
+        r = _row(c, "")
+        self.cell_border = _switch(r, "No cytoplasm for cells cut by the image edge", d.exclude_border_cells)
+        self.cell_border.pack(side="left")
+        self.cell_info = ctk.CTkLabel(c, text="", font=T.font(11), text_color=T.MUTED, anchor="w", justify="left",
+                                      wraplength=900)
+        self.cell_info.pack(fill="x", padx=18, pady=(2, 12))
 
         # spots
         c = Card(self.body)
@@ -248,6 +280,12 @@ class AnalyzePage(ctk.CTkFrame):
             val.pack(side="left", padx=8)
             ctk.CTkLabel(r, text="value (Fixed - value only)", font=T.font(11), text_color=T.MUTED).pack(side="left")
             self.thr_widgets[ch] = (menu, val)
+        values = list(CELL_MARKER_CHOICES) + [f"{ch} · {', '.join(ds.stains_for(ch))}" if ds.stains_for(ch) else ch
+                                              for ch in ds.signal_channels]
+        self.cell_marker.configure(values=values)
+        if self.cell_marker.get() not in values:
+            self.cell_marker.set(values[0])
+        self.cell_info.configure(text=self._describe_cells(ds))
         self.field_menu.configure(values=[f.key for f in ds.fields])
         self.field_menu.set(ds.fields[0].key if ds.fields else "")
 
@@ -270,11 +308,37 @@ class AnalyzePage(ctk.CTkFrame):
                 spot_sensitivity=round(float(self.sens.get()), 1), spot_declump=bool(self.declump.get()),
                 coloc_randomizations=int(self.rand.get()), replicate_column=REPLICATE_CHOICES[self.rep.get()],
                 workers=max(1, int(self.workers.get())), qc_overlays=bool(self.qc.get()),
+                cell_segmentation=self._marker_choice()[0], cell_marker=self._marker_choice()[1],
+                cell_method=CELL_METHODS[self.cell_method.get()], cell_diameter_um=float(self.cell_diam.get()),
+                exclude_border_cells=bool(self.cell_border.get()),
                 treatment_order=_csv(self.t_order.get()), cell_type_order=_csv(self.ct_order.get()),
                 spot_fixed_threshold=self._fixed_thresholds())
         except ValueError as exc:
             self.app.toast(f"Check the settings: {exc}", kind="warning")
             return None
+
+    def _marker_choice(self) -> tuple[str, str]:
+        v = self.cell_marker.get()
+        if v in CELL_MARKER_CHOICES:
+            return CELL_MARKER_CHOICES[v]
+        return "auto", v.split(" ")[0]  # "AF488 · F-Actin" -> a fixed channel
+
+    def _describe_cells(self, ds) -> str:
+        """Which staining panels get cell boundaries, from which channel (default settings)."""
+        from ..analysis.cells import cell_marker_for
+        from ..analysis.params import AnalysisParams
+
+        p = AnalysisParams()
+        by_panel = {}
+        for f in ds.fields:
+            m = cell_marker_for(f.stains, f.channels, p)
+            by_panel.setdefault(f.antibody or "(no panel)", set()).add(f"{m} ({f.stains.get(m, '')})" if m else "")
+        on = [f"{ab}: {', '.join(sorted(s - {''}))}" for ab, s in by_panel.items() if s - {""}]
+        off = [ab for ab, s in by_panel.items() if not (s - {""})]
+        if not on:
+            return "Auto: no well has a cell-boundary stain - only nuclei are measured. Choose a channel above to force it."
+        return ("Auto finds cell boundaries in " + "; ".join(on)
+                + (f".  Nuclei only: {', '.join(off)}." if off else "."))
 
     def _fixed_thresholds(self) -> dict[str, float]:
         out = {}

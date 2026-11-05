@@ -25,6 +25,15 @@ class AnalysisParams:
     # Every segmented nucleus is analysed whatever its DAPI intensity; only saturation flags a nucleus.
     qc_max_saturated_frac: float = 0.01  # > 1 % saturated pixels in a measured signal channel -> flagged
 
+    # --- cells / cytoplasm (optional) -------------------------------------------------------------------
+    # Fields with a cell-body / edge stain (F-actin, phalloidin, CellMask, tubulin, WGA - from the plate map)
+    # get whole-cell boundaries; cytoplasm = cell minus nucleus.
+    cell_segmentation: str = "auto"  # "auto" (fields with a cell-boundary stain) or "off"
+    cell_marker: str = ""  # channel for cell boundaries; "" = from the stain names
+    cell_method: str = "auto"  # "auto" (Cellpose if installed), "cellpose" (Cellpose-SAM), "classical"
+    cell_diameter_um: float = 45.0  # typical cell diameter; sets the scale for segmentation
+    exclude_border_cells: bool = True  # cells cut by the image edge get no cytoplasm measurements
+
     # --- spots (speckles / nuclear bodies) ----------------------------------------------------------
     spot_min_diameter_um: float = 0.25
     spot_max_diameter_um: float = 3.0

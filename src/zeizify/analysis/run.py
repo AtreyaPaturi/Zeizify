@@ -67,6 +67,26 @@ def _mask_path(masks: Path, fi: FieldImages) -> Path:
     return masks / f"{fi.key}_nuclei.tif"
 
 
+def _cells_path(masks: Path, fi: FieldImages) -> Path:
+    return masks / f"{fi.key}_cells.tif"
+
+
+def _cells_signature(params: AnalysisParams, method: str, nuclei_sig: str) -> str:
+    keys = (nuclei_sig, method, params.cell_marker, params.cell_diameter_um, params.exclude_border_cells)
+    return hashlib.sha1(repr(keys).encode()).hexdigest()[:12]
+
+
+def _cells_task(fi: FieldImages, marker: str, nuclear: str, nuclei_path: Path, params: AnalysisParams, px_um: float,
+                method: str, out: Path) -> str:
+    from .cells import segment_cells
+
+    nuclei = tifffile.imread(nuclei_path).astype(np.int32)
+    lab = segment_cells(tifffile.imread(fi.channels[marker]), tifffile.imread(fi.channels[nuclear]), nuclei, params,
+                        px_um, method)
+    tifffile.imwrite(out, lab.astype(np.uint16 if lab.max() < 65535 else np.uint32), compression="zlib")
+    return fi.key
+
+
 def _segment_task(fi: FieldImages, nuclear: str, params: AnalysisParams, px_um: float, method: str, out: Path) -> str:
     lab = segment_nuclei(tifffile.imread(fi.channels[nuclear]), params, px_um, method)
     tifffile.imwrite(out, lab.astype(np.uint16 if lab.max() < 65535 else np.uint32), compression="zlib")
@@ -105,13 +125,16 @@ def resolve_spot_floors(params: AnalysisParams, channels: list[str], candidates:
 
 def _measure_task(fi: FieldImages, mask: Path, nuclear: str, spot_channels: list[str], params: AnalysisParams,
                   px_um: float, bits: "int | None", qc_png: "Path | None",
-                  floors: "dict[str, float] | None" = None) -> FieldResult:
+                  floors: "dict[str, float] | None" = None, cells_path: "Path | None" = None,
+                  marker: "str | None" = None) -> FieldResult:
     import warnings
 
     warnings.filterwarnings("ignore")
     try:
         nuclei = tifffile.imread(mask).astype(np.int32)
-        return measure_field(fi, nuclei, nuclear, spot_channels, params, px_um, bits, qc_png, floors)
+        cells = tifffile.imread(cells_path).astype(np.int32) if cells_path is not None and cells_path.exists() else None
+        return measure_field(fi, nuclei, nuclear, spot_channels, params, px_um, bits, qc_png, floors, cells,
+                             marker if cells is not None else None)
     except Exception as exc:  # noqa: BLE001 - one bad field never aborts the run
         return FieldResult(fi.key, error=f"{exc}\n{traceback.format_exc(limit=3)}")
 
@@ -222,6 +245,54 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
     log(f"Nuclei done in {timings['nuclei_s']} s.")
     t_stage = time.monotonic()
 
+    # ---- stage 1b: whole cells (fields with a cell-boundary marker, e.g. F-actin), cached ----
+    from .cells import cell_marker_for, resolve_cell_method
+
+    markers = {f.key: cell_marker_for(f.stains, f.channels, params) for f in todo}
+    cell_fields = [f for f in todo if markers[f.key] and _mask_path(masks, f).exists()]
+    cell_method = resolve_cell_method(params) if cell_fields else ""
+    if cell_fields:
+        csig = _cells_signature(params, cell_method, sig)
+        csig_file = masks / "cells_signature.json"
+        cold = json.loads(csig_file.read_text()) if csig_file.exists() else {}
+        if cold.get("signature") != csig:
+            for p in masks.glob("*_cells.tif"):
+                p.unlink()
+            csig_file.write_text(json.dumps({"signature": csig, "method": cell_method}, indent=2))
+        need_c = [f for f in cell_fields if not _cells_path(masks, f).exists()]
+        used = sorted({f"{markers[f.key]} ({f.stains.get(markers[f.key], '')})" for f in cell_fields})
+        log(f"Cells: {len(cell_fields)} field(s) with a cell-boundary marker - {', '.join(used)} - method "
+            f"{cell_method}; {len(cell_fields) - len(need_c)} cached, {len(need_c)} to segment.")
+        args = lambda f: (f, markers[f.key], nuclear, _mask_path(masks, f), params, ds.px_um, cell_method,  # noqa: E731
+                          _cells_path(masks, f))
+        if need_c and cell_method == "cellpose":
+            for i, f in enumerate(need_c, start=1):
+                if stop.is_set():
+                    break
+                try:
+                    _cells_task(*args(f))
+                except Exception as exc:  # noqa: BLE001
+                    errors.append((f.key, f"cells: {exc}"))
+                prog("nuclei", i, len(need_c), f"cells {f.well} {f.field}")
+        elif need_c:
+            with ProcessPoolExecutor(max_workers=params.workers) as ex:
+                futs = {ex.submit(_cells_task, *args(f)): f for f in need_c}
+                for i, fut in enumerate(as_completed(futs), start=1):
+                    f = futs[fut]
+                    if stop.is_set():
+                        for x in futs:
+                            x.cancel()
+                    try:
+                        fut.result()
+                    except Exception as exc:  # noqa: BLE001
+                        errors.append((f.key, f"cells: {exc}"))
+                    prog("nuclei", i, len(need_c), f"cells {f.well} {f.field}")
+        if stop.is_set():
+            raise InterruptedError("Stopped during cell segmentation - finished masks are cached.")
+        timings["cells_s"] = round(time.monotonic() - t_stage, 1)
+        log(f"Cells done in {timings['cells_s']} s.")
+        t_stage = time.monotonic()
+
     # ---- stage 2: measure (parallel) ----
     qc_dir = adir / "qc"
     results: list[FieldResult] = []
@@ -262,7 +333,8 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
     with ProcessPoolExecutor(max_workers=params.workers) as ex:
         futs = {ex.submit(_measure_task, f, _mask_path(masks, f), nuclear, spot_channels, params, ds.px_um,
                           ds.bit_ceiling, (qc_dir / f"{f.key}_qc.png") if params.qc_overlays else None,
-                          floors): f for f in ready}
+                          floors, _cells_path(masks, f) if markers.get(f.key) else None, markers.get(f.key)): f
+                for f in ready}
         for i, fut in enumerate(as_completed(futs), start=1):
             f = futs[fut]
             if stop.is_set():
@@ -335,6 +407,8 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
         "input": str(Path(out_dir)),
         "nuclear_channel": nuclear, "spot_channels": spot_channels, "pixel_size_um": ds.px_um,
         "nucleus_method": method, "params": params.to_dict(), "spot_thresholds": spot_floors,
+        "cell_method": cell_method, "cell_fields": len(cell_fields),
+        "cell_markers": sorted({markers[f.key] for f in cell_fields}),
         "fields_analysed": len(results), "errors": [{"field": k, "error": e} for k, e in errors],
         "nuclei_total": int(len(nuclei)), "nuclei_qc_pass": int(nuclei["qc_pass"].sum()) if len(nuclei) else 0,
         "replicate_unit": replicate_unit(params, ds),
@@ -352,6 +426,11 @@ def preview_field(out_dir: "str | Path", key: str, params: AnalysisParams, png: 
     nuclear = params.nuclear_channel or ds.nuclear
     method = resolve_method(params)
     nuclei = segment_nuclei(tifffile.imread(fi.channels[nuclear]), params, ds.px_um, method)
+    from .cells import cell_marker_for, segment_cells
+
+    marker = cell_marker_for(fi.stains, fi.channels, params)
+    cells = (segment_cells(tifffile.imread(fi.channels[marker]), tifffile.imread(fi.channels[nuclear]), nuclei, params,
+                           ds.px_um) if marker else None)
     channels = params.spot_channels or ds.signal_channels
     floors = {c: float(v) for c, v in params.spot_fixed_threshold.items() if v and v > 0}
     auto = [c for c, v in params.spot_fixed_threshold.items() if not (v and v > 0)]
@@ -359,4 +438,5 @@ def preview_field(out_dir: "str | Path", key: str, params: AnalysisParams, png: 
         man = Path(out_dir) / "analysis" / "analysis_manifest.json"
         last = json.loads(man.read_text(encoding="utf-8")).get("spot_thresholds", {}) if man.exists() else {}
         floors.update({c: last[c]["floor"] for c in auto if c in last})
-    return measure_field(fi, nuclei, nuclear, channels, params, ds.px_um, ds.bit_ceiling, png, floors), method
+    return measure_field(fi, nuclei, nuclear, channels, params, ds.px_um, ds.bit_ceiling, png, floors, cells,
+                         marker), method

@@ -3,6 +3,24 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.12.0] - 2026-11-05
+
+### Added
+- **Cells and cytoplasm.** Wells stained for a cell-body or edge marker (F-actin / phalloidin, CellMask,
+  tubulin, WGA; read from the plate map, or a chosen channel) get whole-cell boundaries.
+  - Cellpose-SAM (`cpsam`), given the marker and DAPI together, separates crowded, touching cells. The
+    fallback is a classical seeded watershed from the nuclei.
+  - Each cell is tied to its nucleus; cells found around several nuclei are split between them.
+  - Cytoplasm = cell minus nuclei. Cells cut by the image edge get no cytoplasm.
+  - New per-cell columns: `cell_area_um2`, `cyto_area_um2`, `<ch>_cyto_mean(_bgsub)`, `<ch>_cyto_integrated`,
+    `<ch>_cell_mean_bgsub` and `<ch>_nc_ratio`. Cell area, cytoplasmic intensity and N/C ratio are in the
+    statistics and SuperPlots; cell outlines are cyan in the QC overlays and Preview.
+  - Cell masks are cached; the manifest records the method and markers.
+  - Settings: the *Cells and cytoplasm* card on the Analyze page, and `--cells`, `--cell-marker`,
+    `--cell-method`, `--cell-diameter`, `--keep-border-cells`.
+- Where cells were segmented, background is taken outside the cells, so cytoplasmic signal is not counted
+  as background.
+
 ## [1.11.2] - 2026-11-05
 
 ### Fixed

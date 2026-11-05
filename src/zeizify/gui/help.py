@@ -141,6 +141,20 @@ HELP: dict[str, dict] = {
                 "qc_pass = False, and left out of the statistics.",
                 "Nuclear masks are cached: changing only spot or colocalization settings re-runs in seconds.",
             ]),
+            ("Cells and cytoplasm", [
+                "Wells stained for F-actin (phalloidin), CellMask, tubulin or WGA get whole-cell boundaries "
+                "automatically - the stain is read from the plate map. Other wells are analysed on nuclei only. "
+                "To use another channel, pick it under Boundary stain; Off disables cells.",
+                "Cellpose-SAM (needs Cellpose) separates crowded, touching cells using the boundary stain and DAPI "
+                "together; Classical grows each nucleus outwards over the stained area. Set the typical cell "
+                "diameter.",
+                "Each cell is tied to its nucleus; a cell found around two nuclei is split between them. "
+                "Cytoplasm = cell minus nucleus. Cells cut by the image edge get no cytoplasm.",
+                "Adds per cell: cell and cytoplasm area, cytoplasmic intensity and the nuclear / cytoplasmic "
+                "ratio of every channel (columns cell_area_um2, cyto_area_um2, <channel>_cyto_mean_bgsub, "
+                "<channel>_nc_ratio). Cell outlines are cyan in the Preview and QC overlays. Cell masks are "
+                "cached like nuclear masks.",
+            ]),
             ("Speckles / nuclear bodies", [
                 "Spot diameter: the size window in µm. PML bodies are ~0.3-1 µm, nuclear speckles ~0.5-3 µm.",
                 "Noise floor: a spot must rise this many robust standard deviations (MADs) above the "

@@ -34,6 +34,40 @@ reported in `nuclei.csv` but not used. A nucleus is flagged (`qc_pass = False`) 
 are saturated in a measured signal channel, because its intensities would then be clipped. Flagged nuclei
 stay in `nuclei.csv` and are excluded from summaries and statistics.
 
+## 1b. Cells and cytoplasm (optional)
+
+Wells stained for a cell-body or cell-edge marker get whole-cell boundaries. The marker is found in the
+plate map: F-actin / phalloidin, CellMask, tubulin, WGA or a membrane / cytoplasm stain. A channel can also
+be chosen explicitly. Other wells are analysed on nuclei only.
+
+- **Cellpose-SAM** (`cpsam`, Cellpose ≥ 4; Pachitariu, Rariden & Stringer, *bioRxiv* 2025) is used when
+  Cellpose is installed: the generalist model that separates crowded, touching cells. It is given the
+  marker and the nuclear stain together, downscaled so a typical cell (default 45 µm) is about 90 px
+  across. With Cellpose 2/3, the `cyto3` model is used.
+- **Classical** (without Cellpose): a seeded watershed from the nuclei on the marker's gradient, within the
+  marker's Otsu foreground and one typical cell diameter of a nucleus, like CellProfiler's
+  IdentifySecondaryObjects.
+- **Assignment.** Each cell is tied to its nucleus (cell id = nucleus id):
+  - a nucleus belongs to the cell holding ≥ 50 % of it;
+  - a cell holding several nuclei (touching cells found as one) is split between them by nearest
+    nucleus;
+  - a cell with no analysed nucleus is dropped.
+- **Cytoplasm** = cell minus nuclei. Cells cut by the image edge get no cytoplasm measurements.
+- **Background.** Where cells were segmented, background is taken > 1 µm outside the cells, so cytoplasmic
+  signal is not mistaken for background. In confluent fields (< 1 % cell-free) it falls back to outside
+  the nuclei.
+
+Per cell (`nuclei.csv`): `cell_area_um2`, `cyto_area_um2`, `cell_marker`, and per channel
+`<ch>_cyto_mean(_bgsub)`, `<ch>_cyto_integrated`, `<ch>_cell_mean_bgsub` and `<ch>_nc_ratio` (nuclear /
+cytoplasmic mean, both background-subtracted). The cell area, cytoplasmic intensity and N/C ratio are
+summarised, tested and plotted like the nuclear metrics. The QC overlays show cell boundaries in cyan.
+
+Validation:
+- synthetic fields: cell masks match the true cell bodies (IoU > 0.85), touching cells found as one are
+  split between their nuclei, and N/C ratios are recovered;
+- RPE1 cells stained for F-actin and cyclin A (24 fields, 1,361 nuclei): Cellpose-SAM gave 80–92 % of
+  nuclei a complete cell (most of the rest were cut by the image edge), in about 2 s per field on a GPU.
+
 ## 2. Spot (speckle / body) detection
 
 The approach is "nuclear mask, then spot objects", as in Alexander et al. (*Nat Cell Biol* 2024), the Aktas

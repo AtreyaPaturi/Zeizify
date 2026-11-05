@@ -18,6 +18,15 @@ Per nucleus and channel (prefix "<channel>_"):
   spot_mean_ecc, spot_mean_solidity, spot_mean_intensity
                                spot counts, sizes and shapes (Alexander 2024; Aktas lab 2026)
 
+Per cell (fields with a cell-boundary marker, e.g. F-actin; cell id = nucleus id):
+  cell_area_um2, cyto_area_um2, cell_marker
+  <channel>_cyto_mean, _cyto_mean_bgsub, _cyto_integrated
+                               cytoplasm = cell minus nuclei
+  <channel>_cell_mean_bgsub    whole cell
+  <channel>_nc_ratio           nuclear / cytoplasmic mean (both background-subtracted)
+  Background is then taken outside the cells (> 1 µm away), so cytoplasmic signal is not counted as
+  background.
+
 Nucleus QC: every segmented nucleus is analysed whatever its DAPI intensity (dapi_ratio, its mean
 DAPI / the field median, is reported but not used). Only nuclei with > qc_max_saturated_frac saturated
 pixels in a measured signal channel are flagged (qc_pass = False); they stay in the tables and are
@@ -64,10 +73,12 @@ def _nan_mean(x) -> float:
 
 def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channels: list[str],
                   params: AnalysisParams, px_um: float, bit_ceiling: "int | None" = None,
-                  qc_png: "Path | None" = None, spot_floors: "dict[str, float] | None" = None) -> FieldResult:
+                  qc_png: "Path | None" = None, spot_floors: "dict[str, float] | None" = None,
+                  cells: "np.ndarray | None" = None, cell_marker: "str | None" = None) -> FieldResult:
     res = FieldResult(fi.key)
     ids = _ids(fi)
-    imgs = {c: tifffile.imread(fi.channels[c]) for c in [nuclear, *spot_channels] if c in fi.channels}
+    load = [nuclear, *spot_channels] + ([cell_marker] if cells is not None and cell_marker else [])
+    imgs = {c: tifffile.imread(fi.channels[c]) for c in dict.fromkeys(load) if c in fi.channels}
     spot_channels = [c for c in spot_channels if c in imgs]
     dapi = imgs[nuclear].astype(np.float64)
     def _ceiling(a: np.ndarray) -> float:
@@ -78,8 +89,13 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
     ceiling = {c: _ceiling(a) for c, a in imgs.items()}
     px2 = px_um * px_um
 
-    # background from pixels well away from any nucleus
-    away = ~morphology.dilation(nuclei > 0, morphology.disk(max(1, int(1.0 / px_um)), decomposition="sequence"))
+    # background from pixels well away from any nucleus - or from any cell, when cells were segmented
+    disk = morphology.disk(max(1, int(1.0 / px_um)), decomposition="sequence")
+    away = ~morphology.dilation(nuclei > 0, disk)
+    if cells is not None:
+        away_cells = ~morphology.dilation((cells > 0) | (nuclei > 0), disk)
+        if away_cells.mean() > 0.01:  # enough cell-free area (not a confluent field)
+            away = away_cells
     bg = {c: (float(np.percentile(a[away], 10)) if away.any() else float(np.percentile(a, 1))) for c, a in imgs.items()}
 
     spots, tophats = {}, {}
@@ -118,6 +134,7 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
     block = max(1, int(round(params.psf_um / px_um)))
     pairs = list(combinations(spot_channels, 2))
     slices = ndi.find_objects(nuclei)
+    cell_slices = ndi.find_objects(cells) if cells is not None else None
 
     for r, dmean in zip(regions, dapi_means):
         nid = r.label
@@ -166,6 +183,8 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
                 n[f"{c}_enrichment"] = float("nan")
             tot = float(np.clip(vb, 0, None).sum())
             n[f"{c}_frac_in_spots"] = float(np.clip(vb[in_spot], 0, None).sum() / tot) if tot > 0 else float("nan")
+        if cells is not None:
+            _measure_cell(n, nid, cells, nuclei, imgs, nuclear, bg, px2, cell_slices, cell_marker)
         res.nuclei.append(n)
 
         for a, b in pairs:
@@ -186,9 +205,39 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
                      **{f"{c}_bg": bg[c] for c in imgs},
                      **{f"{c}_saturated_field": fi.saturated.get(c, False) for c in imgs}}
 
+    if cells is not None:
+        res.field_row["cells_with_cytoplasm"] = sum(1 for x in res.nuclei if x.get("cyto_area_um2", 0) > 0)
     if qc_png is not None:
-        write_overlay(qc_png, imgs, nuclear, spot_channels, nuclei, spots, res.nuclei)
+        write_overlay(qc_png, imgs, nuclear, spot_channels, nuclei, spots, res.nuclei, cells=cells, marker=cell_marker)
     return res
+
+
+def _measure_cell(n: dict, nid: int, cells: np.ndarray, nuclei: np.ndarray, imgs: dict, nuclear: str, bg: dict,
+                  px2: float, cell_slices, marker: "str | None") -> None:
+    """Cell / cytoplasm measurements of one nucleus's cell (in place)."""
+    sl = cell_slices[nid - 1] if nid - 1 < len(cell_slices) else None
+    n["cell_marker"] = marker or ""
+    if sl is None:
+        n["cell_area_um2"], n["cyto_area_um2"] = float("nan"), 0.0
+        return
+    cell = cells[sl] == nid
+    cyto = cell & (nuclei[sl] == 0)
+    nucm = nuclei[sl] == nid
+    n["cyto_area_um2"] = float(cyto.sum() * px2)
+    n["cell_area_um2"] = float(cell.sum() * px2) if cyto.any() else float("nan")  # no cell (e.g. cut by the edge)
+    for c, img in imgs.items():
+        if c == nuclear:
+            continue
+        a = img[sl].astype(np.float64)
+        has = cyto.any()
+        cm = float(a[cyto].mean()) if has else float("nan")
+        cmb = cm - bg[c] if has else float("nan")
+        nmb = float(a[nucm].mean()) - bg[c] if nucm.any() else float("nan")
+        n[f"{c}_cyto_mean"] = cm
+        n[f"{c}_cyto_mean_bgsub"] = cmb
+        n[f"{c}_cyto_integrated"] = float(a[cyto].sum()) if has else float("nan")
+        n[f"{c}_cell_mean_bgsub"] = float(a[cell].mean()) - bg[c] if has else float("nan")
+        n[f"{c}_nc_ratio"] = nmb / cmb if has and cmb > 0 else float("nan")
 
 
 def _pair_type(sa: str, sb: str) -> str:
@@ -203,7 +252,8 @@ OVERLAY_COLORS = [(0, 255, 0), (255, 0, 255), (0, 255, 255), (255, 255, 0)]
 
 
 def write_overlay(path: Path, imgs: dict, nuclear: str, spot_channels: list[str], nuclei: np.ndarray,
-                  spots: dict, nuc_rows: list[dict], max_side: int = 1600) -> None:
+                  spots: dict, nuc_rows: list[dict], max_side: int = 1600, cells: "np.ndarray | None" = None,
+                  marker: "str | None" = None) -> None:
     """Composite (nuclear stain blue, first two spot channels green/magenta) with nucleus outlines
     (white = analysed, red = QC-flagged) and spot outlines in each channel's color."""
     from PIL import Image
@@ -222,6 +272,8 @@ def write_overlay(path: Path, imgs: dict, nuclear: str, spot_channels: list[str]
 
     rgb = np.zeros((*shape, 3), np.float32)
     rgb[..., 2] += 0.8 * small(stretch(imgs[nuclear]))
+    if cells is not None and marker in imgs and marker not in spot_channels:  # cell-boundary stain, faint grey
+        rgb += 0.35 * small(stretch(imgs[marker]))[..., None]
     for c, col in zip(spot_channels, OVERLAY_COLORS):
         rgb += 0.8 * small(stretch(imgs[c]))[..., None] * (np.array(col, np.float32) / 255)
     rgb = np.clip(rgb, 0, 1) * 255
@@ -229,6 +281,8 @@ def write_overlay(path: Path, imgs: dict, nuclear: str, spot_channels: list[str]
     failed = {r["nucleus_id"] for r in nuc_rows if not r["qc_pass"]}
     edge = segmentation.find_boundaries(nl, mode="outer")
     near_failed = np.isin(ndi.grey_dilation(nl, size=3), list(failed)) if failed else np.zeros_like(edge)
+    if cells is not None:  # cell boundaries in cyan, under the nucleus outlines
+        rgb[segmentation.find_boundaries(small(cells, order=0).astype(np.int32), mode="inner")] = (0, 220, 255)
     rgb[edge] = (255, 255, 255)
     rgb[edge & near_failed] = (255, 60, 60)
     for c, col in zip(spot_channels, OVERLAY_COLORS):

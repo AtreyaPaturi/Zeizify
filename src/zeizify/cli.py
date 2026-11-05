@@ -116,6 +116,14 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--fixed-threshold", action="append", default=[], metavar="CHANNEL[=VALUE]",
                    help="one spot brightness floor for every well in CHANNEL (repeatable); VALUE in top-hat "
                         "intensity, omitted = automatic. For stains whose bodies vanish in some conditions")
+    a.add_argument("--cells", choices=["auto", "off"], default=d.cell_segmentation,
+                   help="whole-cell boundaries (cytoplasm) for wells with a cell-body stain such as F-actin (auto)")
+    a.add_argument("--cell-marker", default="", metavar="CHANNEL",
+                   help="channel for cell boundaries (default: from the stain names - F-actin, phalloidin, ...)")
+    a.add_argument("--cell-method", choices=["auto", "cellpose", "classical"], default=d.cell_method,
+                   help="Cellpose-SAM (separates touching cells) or classical seeded watershed")
+    a.add_argument("--cell-diameter", type=float, default=d.cell_diameter_um, metavar="UM")
+    a.add_argument("--keep-border-cells", action="store_true", help="measure cytoplasm of cells cut by the image edge")
     a.add_argument("--randomizations", type=int, default=d.coloc_randomizations,
                    help="Costes significance randomizations per nucleus (0 = off)")
     a.add_argument("--replicate-column", default="", help="plate-map column defining replicates (default: Replicate, else well)")
@@ -230,7 +238,8 @@ def _analyze(args) -> int:
         exclude_border_nuclei=not args.keep_border_nuclei, use_gpu=not args.cpu,
         spot_min_diameter_um=args.spot_diameter[0], spot_max_diameter_um=args.spot_diameter[1],
         spot_sensitivity=args.sensitivity, spot_declump=not args.no_declump,
-        coloc_randomizations=args.randomizations,
+        coloc_randomizations=args.randomizations, cell_segmentation=args.cells, cell_marker=args.cell_marker,
+        cell_method=args.cell_method, cell_diameter_um=args.cell_diameter, exclude_border_cells=not args.keep_border_cells,
         replicate_column=args.replicate_column, workers=args.workers, qc_overlays=not args.no_qc,
         treatment_order=_csv(args.treatment_order), cell_type_order=_csv(args.cell_type_order),
         spot_fixed_threshold=_fixed(args.fixed_threshold))

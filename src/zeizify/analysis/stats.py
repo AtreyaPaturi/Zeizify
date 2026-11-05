@@ -27,7 +27,8 @@ from scipy import stats
 
 from ..contrast import CONTROL_KEYWORDS
 
-NUCLEUS_METRICS = {"area_um2": "nuclear area (µm²)", "dapi_integrated": "integrated DAPI"}
+NUCLEUS_METRICS = {"area_um2": "nuclear area (µm²)", "dapi_integrated": "integrated DAPI",
+                   "cell_area_um2": "cell area (µm²)", "cyto_area_um2": "cytoplasm area (µm²)"}
 CHANNEL_METRICS = {
     "spots_n": "spots per nucleus",
     "spots_area_frac": "nuclear area in spots (fraction)",
@@ -38,6 +39,8 @@ CHANNEL_METRICS = {
     "enrichment": "spot / nucleoplasm intensity",
     "frac_in_spots": "fraction of signal in spots",
     "mean_bgsub": "mean nuclear intensity (bg-subtracted)",
+    "cyto_mean_bgsub": "mean cytoplasmic intensity (bg-subtracted)",
+    "nc_ratio": "nuclear / cytoplasmic intensity",
 }
 COLOC_METRICS = {
     "pearson": "Pearson's r",
@@ -55,7 +58,8 @@ COLOC_METRICS = {
     "enrich_a": "A-in-B overlap vs chance",
     "nn_ab_um": "A→B nearest spot (µm)",
 }
-SUPERPLOT_CHANNEL = ["spots_n", "spot_mean_area_halfmax_um2", "spots_area_frac", "cv", "enrichment"]
+SUPERPLOT_CHANNEL = ["spots_n", "spot_mean_area_halfmax_um2", "spots_area_frac", "cv", "enrichment", "nc_ratio",
+                     "cyto_mean_bgsub"]
 SUPERPLOT_COLOC = ["n_double", "n_a_only", "n_b_only", "pearson", "tm1", "tm2", "frac_a_overlap"]
 WILDTYPE_KEYWORDS = ("wt", "wildtype", "wild", "parental", "control", "ctrl")
 REPLICATE_COLORS = ["#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#0072B2", "#D55E00", "#F0E442", "#999999"]  # Okabe-Ito
@@ -127,6 +131,9 @@ def long_table(nuclei: pd.DataFrame, coloc: pd.DataFrame, channels: list[str]) -
         return pd.DataFrame(columns=ids + ["metric", "metric_label", "feature", "stain", "value"])
     out = pd.concat(parts, ignore_index=True)
     out["value"] = pd.to_numeric(out["value"], errors="coerce")
+    if "metric" in out:  # cell metrics exist only where cells were segmented: drop the empty rows
+        cellm = out["metric"].isin(["cell_area_um2", "cyto_area_um2", "cyto_mean_bgsub", "nc_ratio"])
+        out = out[~cellm | (out["value"].notna() & ((out["value"] != 0) | ~out["metric"].str.endswith("area_um2")))]
     return out
 
 
