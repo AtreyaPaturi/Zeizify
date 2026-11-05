@@ -172,9 +172,12 @@ def test_run_analysis_end_to_end(tmp_path):
                  "stats_omnibus", "stats_pairwise"):
         assert (adir / f"{name}.csv").exists()
     assert (adir / "analysis_manifest.json").exists() and res.overview_plots and res.overview_plots[0].exists()
-    assert res.overview_plots[1].name.endswith("_single_double_positive.png") and res.overview_plots[1].exists()
-    assert res.overview_plots[2].name.endswith("_spot_categories.png") and res.overview_plots[2].exists()
-    assert res.overview_plots[3].name.endswith("_spot_area_per_nucleus.png") and res.overview_plots[3].exists()
+    names = [p.name.split("_", 2)[-1] if p.name.startswith("X_Y_") else p.name for p in res.overview_plots]
+    assert names[:5] == ["spots_per_nucleus.png", "single_double_positive.png", "spot_categories.png",
+                         "high_cells.png", "spot_area_per_nucleus.png"]
+    assert all(p.exists() for p in res.overview_plots)
+    high = pd.read_csv(adir / "high_thresholds.csv")
+    assert set(high["reference"]) == {"WT · Mock"} and (high["percentile"] == 95).all()
     assert (adir / "spot_categories.csv").exists()
     assert res.overview_plots[0].name.endswith("_spots_per_nucleus.png") and (adir / "spot_count_distribution.csv").exists()
     nuclei = pd.read_csv(adir / "nuclei.csv")
@@ -329,3 +332,48 @@ def test_spot_category_table_shares_and_errors():
     one = spot_category_table(pd.DataFrame([r for r in rows if r["replicate"] == "W1"])).set_index("category")
     assert set(one["error_type"]) == {"SEM over nuclei"}
     assert one.loc["n_double", "error"] == pytest.approx(np.std([4, 6], ddof=1) / np.sqrt(2))
+
+
+def _toy_nuclei():
+    rng = np.random.default_rng(0)
+    rows = []
+    for ct, t, mu, well in (("WT", "Mock", 100, "A1"), ("KO", "Mock", 200, "B1"), ("WT", "Drug", 300, "A2"),
+                            ("KO", "Drug", 300, "B2")):
+        for v in rng.normal(mu, 10, 200):
+            rows.append({"antibody": "X", "cell_type": ct, "treatment": t, "replicate": well, "well": well,
+                         "qc_pass": True, "AF488_mean_bgsub": v, "AF488_stain": "X"})
+    return pd.DataFrame(rows)
+
+
+def test_high_cells_use_the_chosen_reference_condition():
+    from zeizify.analysis.stats import add_high_flags, long_table, replicate_summary
+
+    n = _toy_nuclei()
+    out, info = add_high_flags(n, ["AF488"], ("WT", "Mock"), 95)
+    thr = info.set_index("compartment").loc["nucleus", "threshold"]
+    assert thr == pytest.approx(np.percentile(n.loc[n["well"] == "A1", "AF488_mean_bgsub"], 95))
+    pct = out.groupby("well")["AF488_high_nucleus"].mean()
+    assert pct["A1"] == pytest.approx(5, abs=1)  # the reference itself: ~5 % above its own 95th percentile
+    assert pct["B1"] > 95 and pct["A2"] == 100  # KO Mock is compared with WT Mock, not with itself
+    # the replicate value is the % of high cells (mean), not a median of 0 / 100
+    rep = replicate_summary(long_table(out, pd.DataFrame(), ["AF488"]))
+    r = rep[(rep["metric"] == "high_nucleus") & (rep["replicate"] == "A1")].iloc[0]
+    assert r["median"] == pytest.approx(r["mean"]) and 0 < r["median"] < 20
+    # a different reference moves the cut-off
+    _, info2 = add_high_flags(n, ["AF488"], ("KO", "Mock"), 95)
+    assert info2["threshold"].iloc[0] > thr + 50
+
+
+def test_every_condition_compared_with_the_reference():
+    from zeizify.analysis.stats import default_orders, long_table, replicate_summary, run_tests
+
+    n = _toy_nuclei()
+    n["replicate"] = n["well"] + np.where(np.arange(len(n)) % 2, "a", "b")  # two replicates per condition
+    long = long_table(n, pd.DataFrame(), ["AF488"])
+    orders = default_orders(long)
+    orders["reference"] = ("WT", "Mock")
+    _, pairs = run_tests(replicate_summary(long), long, orders)
+    vr = pairs[(pairs["compare"] == "vs_reference") & (pairs["metric"] == "mean_bgsub")]
+    assert set(vr["group_a"]) == {"WT · Mock"}
+    assert set(vr["group_b"]) == {"KO · Mock", "WT · Drug", "KO · Drug"}
+    assert vr["vs_control"].all() and (vr["diff_replicate_means"] > 50).all()

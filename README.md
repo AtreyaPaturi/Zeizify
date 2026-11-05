@@ -206,6 +206,7 @@ zeizify analyze out/                                  # defaults: Cellpose if in
 zeizify analyze out/ --spot-diameter 0.3 2 --sensitivity 5 --randomizations 100 --replicate-column Replicate
 zeizify analyze out/ --treatment-order "MOCK,ML792,MG132,ML792+MG132" --cell-type-order "WT,KO1"
 zeizify analyze out/ --fixed-threshold AF594        # one spot brightness floor for every well (automatic)
+zeizify analyze out/ --reference "WT,MOCK" --high-percentile 95   # compare everything with WT · MOCK
 ```
 
 1. **Nuclei** are segmented from DAPI with Cellpose (or classical threshold + watershed). Edge-touching
@@ -226,7 +227,10 @@ zeizify analyze out/ --fixed-threshold AF594        # one spot brightness floor 
 4. **Colocalization** for every channel pair: Pearson, Spearman, Li ICQ, Manders tM1/tM2 with Costes
    thresholds (Fiji Coloc 2 definitions), optional Costes significance, and object overlap / enrichment over
    chance / nearest-neighbour distance. Single-stain wells are labelled as bleed-through controls.
-5. **Statistics** on replicate medians (SuperPlots): Welch ANOVA, Games-Howell, BH q-values, Hedges' g and
+5. **Reference condition and high cells.** Choose a reference condition (default wild type + control, e.g.
+   WT · MOCK). Every condition is compared with it, and "high" cells are those brighter than its 95th
+   percentile, reported as % of cells per condition (`<panel>_high_cells.png`).
+6. **Statistics** on replicate medians (SuperPlots): Welch ANOVA, Games-Howell, BH q-values, Hedges' g and
    Cliff's delta. Treatments are compared within each cell type, and cell types (WT vs KO) within each
    treatment.
 6. **Figures** per staining panel, with all cell types side by side in each graph: a spots-per-nucleus figure

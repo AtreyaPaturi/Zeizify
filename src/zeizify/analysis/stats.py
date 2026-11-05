@@ -40,6 +40,10 @@ CHANNEL_METRICS = {
     "frac_in_spots": "fraction of signal in spots",
     "mean_bgsub": "mean nuclear intensity (bg-subtracted)",
     "cyto_mean_bgsub": "mean cytoplasmic intensity (bg-subtracted)",
+    "cell_mean_bgsub": "mean whole-cell intensity (bg-subtracted)",
+    "high_nucleus": "% cells with high nuclear intensity",
+    "high_cytoplasm": "% cells with high cytoplasmic intensity",
+    "high_cell": "% cells with high whole-cell intensity",
     "cyto_spots_n": "spots per cell in the cytoplasm",
     "cell_spots_n": "spots per cell (nucleus + cytoplasm)",
     "cyto_spot_mean_area_halfmax_um2": "mean cytoplasmic spot size at half max (µm²)",
@@ -61,8 +65,12 @@ COLOC_METRICS = {
     "enrich_a": "A-in-B overlap vs chance",
     "nn_ab_um": "A→B nearest spot (µm)",
 }
-SUPERPLOT_CHANNEL = ["spots_n", "cyto_spots_n", "cell_spots_n", "spot_mean_area_halfmax_um2", "spots_area_frac", "cv",
-                     "enrichment", "nc_ratio", "cyto_mean_bgsub"]
+SUPERPLOT_CHANNEL = ["mean_bgsub", "cyto_mean_bgsub", "cell_mean_bgsub", "spots_n", "cyto_spots_n", "cell_spots_n",
+                     "spot_mean_area_halfmax_um2", "spots_area_frac", "cv", "enrichment", "nc_ratio"]
+# "high" cells: intensity column -> (metric, compartment); per cell 0 / 100, per replicate the % of cells
+HIGH_SOURCES = {"mean_bgsub": ("high_nucleus", "nucleus"), "cyto_mean_bgsub": ("high_cytoplasm", "cytoplasm"),
+                "cell_mean_bgsub": ("high_cell", "whole cell")}
+FRACTION_METRICS = {m for m, _ in HIGH_SOURCES.values()}
 SUPERPLOT_COLOC = ["n_double", "n_a_only", "n_b_only", "pearson", "tm1", "tm2", "frac_a_overlap"]
 WILDTYPE_KEYWORDS = ("wt", "wildtype", "wild", "parental", "control", "ctrl")
 REPLICATE_COLORS = ["#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#0072B2", "#D55E00", "#F0E442", "#999999"]  # Okabe-Ito
@@ -99,6 +107,44 @@ def level_order(df: pd.DataFrame, col: str, preferred=(), first=None) -> list[st
         return (pref.index(lo) if lo in pref else len(pref), 0 if first and first(lv) else 1, pos.get(lv, (2, lv, 0)))
 
     return sorted(levels, key=key)
+
+
+def resolve_reference(orders: dict, cell_type: str = "", treatment: str = "") -> tuple[str, str]:
+    """The reference condition: the given cell type / treatment, else the first in display order (wild type,
+    control)."""
+    ct = cell_type if cell_type else (orders.get("cell_type") or [""])[0]
+    t = treatment if treatment else (orders.get("treatment") or [""])[0]
+    return ct, t
+
+
+def add_high_flags(nuclei: pd.DataFrame, channels: list[str], reference: tuple[str, str],
+                   percentile: float) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Mark each cell 'high' (100) or not (0) per channel and compartment: above the `percentile` of the
+    reference condition's QC-passed cells of the same staining panel. Returns (nuclei with
+    <ch>_high_nucleus / _high_cytoplasm / _high_cell columns, thresholds table)."""
+    nuclei = nuclei.copy()
+    rows = []
+    ref_ct, ref_t = reference
+    for ab, sub in nuclei.groupby("antibody", dropna=False):
+        ref = sub[(sub["cell_type"] == ref_ct) & (sub["treatment"] == ref_t) & sub["qc_pass"]]
+        for c in channels:
+            for src, (metric, where) in HIGH_SOURCES.items():
+                col = f"{c}_{src}"
+                if col not in sub:
+                    continue
+                vals = ref[col].dropna()
+                out = f"{c}_{metric}"
+                if len(vals) < 5:  # no (usable) reference condition in this panel
+                    rows.append({"antibody": ab, "channel": c, "compartment": where, "reference": f"{ref_ct} · {ref_t}",
+                                 "percentile": percentile, "threshold": float("nan"), "n_reference_cells": len(vals),
+                                 "note": "reference condition missing or < 5 cells in this panel"})
+                    continue
+                thr = float(np.percentile(vals, percentile))
+                v = sub[col]
+                nuclei.loc[sub.index, out] = np.where(v.notna(), np.where(v > thr, 100.0, 0.0), np.nan)
+                rows.append({"antibody": ab, "channel": c, "compartment": where, "reference": f"{ref_ct} · {ref_t}",
+                             "percentile": percentile, "threshold": thr, "n_reference_cells": len(vals), "note": ""})
+    return nuclei, pd.DataFrame(rows)
 
 
 def default_orders(long: pd.DataFrame, treatments=(), cell_types=()) -> dict:
@@ -151,6 +197,8 @@ PAIR_COLUMNS = GROUP + ["treatment", "compare", "stain", "group_a", "group_b", "
 def replicate_summary(long: pd.DataFrame) -> pd.DataFrame:
     g = long.groupby(GROUP + ["stain", "treatment", "replicate"], dropna=False)["value"]
     rep = g.agg(n_nuclei="count", median="median", mean="mean").reset_index()
+    frac = rep["metric"].isin(FRACTION_METRICS)  # per replicate: the % of high cells (mean of 0 / 100), not a median
+    rep.loc[frac, "median"] = rep.loc[frac, "mean"]
     return rep[rep["n_nuclei"] > 0]
 
 
@@ -294,6 +342,25 @@ def run_tests(rep: pd.DataFrame, long: pd.DataFrame, orders: "dict | None" = Non
                 "stain": ";".join(sorted(set(sub["stain"].astype(str)) - {""}))}
         ref = order[0] if is_wildtype(order[0]) else ""
         pairs += _pair_rows(base, groups, _select(long, cgroup, key), "cell_type", ref)
+    # every condition vs the reference condition (e.g. WT · MOCK), across cell types
+    ref = orders.get("reference")
+    if ref:
+        rgroup = ["antibody", "metric", "metric_label", "feature"]
+        ref_label = f"{ref[0]} · {ref[1]}"
+        lk = long.assign(condition=long["cell_type"].astype(str) + " · " + long["treatment"].astype(str))
+        for key, sub in rep.groupby(rgroup, dropna=False):
+            sub = sub.assign(condition=sub["cell_type"].astype(str) + " · " + sub["treatment"].astype(str))
+            if ref_label not in set(sub["condition"]):
+                continue
+            sel = _select(lk, rgroup, key)
+            ref_v = sub.loc[sub["condition"] == ref_label, "median"].dropna().to_numpy()
+            base = {**dict(zip(rgroup, key)), "cell_type": "", "treatment": "", "compare": "vs_reference",
+                    "stain": ";".join(sorted(set(sub["stain"].astype(str)) - {""}))}
+            conds = [f"{c} · {t}" for c in orders["cell_type"] for t in orders["treatment"]]
+            for cond in [c for c in conds if c != ref_label and c in set(sub["condition"])]:
+                v = sub.loc[sub["condition"] == cond, "median"].dropna().to_numpy()
+                if len(v):
+                    pairs += _pair_rows(base, {ref_label: ref_v, cond: v}, sel, "condition", ref_label)
     omni_df = pd.DataFrame(omni, columns=OMNI_COLUMNS) if omni else pd.DataFrame(columns=OMNI_COLUMNS)
     omni_df["welch_q_bh"] = bh_qvalues(omni_df["welch_p"].to_numpy()) if len(omni_df) else []
     return omni_df, (pd.DataFrame(pairs, columns=PAIR_COLUMNS) if pairs else pd.DataFrame(columns=PAIR_COLUMNS))
@@ -648,8 +715,57 @@ def _category_figure(tab: pd.DataFrame, t_order: list, ct_order: list, header: s
     plt.close(fig)
 
 
+def _high_cells_figure(rsub: pd.DataFrame, items: list, t_order: list, ct_order: list, header: str,
+                       high_info: "pd.DataFrame | None", path) -> None:
+    """100 % stacked bars: % of cells above / below the reference condition's cut-off, per condition; one
+    panel per channel and compartment. With >= 2 replicates, error bar = SD of the replicate %."""
+    import matplotlib.pyplot as plt
+
+    where = {"high_nucleus": "nucleus", "high_cytoplasm": "cytoplasm", "high_cell": "whole cell"}
+    pos = _positions(t_order, ct_order)
+    w = max(3.6, 0.8 + 0.42 * len(t_order) * (max(1, len(ct_order)) + 0.6))
+    ncol = min(3, len(items))
+    nrow = math.ceil(len(items) / ncol)
+    fig, axes = plt.subplots(nrow, ncol, figsize=(ncol * (w + 1.0), 4.0 * nrow), squeeze=False)
+    for ax in axes.ravel()[len(items):]:
+        ax.axis("off")
+    for ax, (feat, m) in zip(axes.ravel(), items):
+        rs = rsub[(rsub["metric"] == m) & (rsub["feature"] == feat)]
+        for (t, ct), x in pos.items():
+            v = rs.loc[(rs["treatment"] == t) & (rs["cell_type"] == ct), "median"].dropna()
+            if not len(v):
+                continue
+            hi = float(v.mean())
+            ax.bar(x, hi, 0.8, color="#C0392B", edgecolor="white", lw=0.6)
+            ax.bar(x, 100 - hi, 0.8, bottom=hi, color="#D5D8DC", edgecolor="white", lw=0.6)
+            if len(v) > 1:
+                ax.errorbar(x, hi, yerr=float(v.std(ddof=1)), color="black", capsize=3, lw=1)
+            ax.text(x, hi + 1.5, f"{hi:.0f}%", ha="center", va="bottom", fontsize=7, fontweight="bold")
+        ax.set_ylim(0, 108)
+        ax.set_yticks([0, 25, 50, 75, 100])
+        ax.set_yticklabels(["0%", "25%", "50%", "75%", "100%"])
+        ax.set_ylabel("% of cells", fontsize=9)
+        st = ";".join(sorted(set(rs["stain"].astype(str)) - {""})) or feat
+        thr = ""
+        if high_info is not None and len(high_info):
+            hrow = high_info[(high_info["channel"] == feat) & (high_info["compartment"] == where[m])]
+            if len(hrow) and np.isfinite(hrow["threshold"].iloc[0]):
+                thr = f"\n> {hrow['threshold'].iloc[0]:.0f} (P{hrow['percentile'].iloc[0]:g} of {hrow['reference'].iloc[0]})"
+        ax.set_title(f"{st} ({feat}): high {where[m]} intensity{thr}", fontsize=9)
+        _group_axis(ax, t_order, ct_order, pos)
+        _box(ax)
+    from matplotlib.patches import Patch
+
+    fig.legend(handles=[Patch(color="#C0392B", label="high"), Patch(color="#D5D8DC", label="not high")],
+               loc="upper right", fontsize=9, frameon=False)
+    fig.suptitle(f"{header} - % of cells with high intensity (cut-off from the reference condition)", fontsize=11)
+    fig.tight_layout(rect=(0, 0, 0.94, 1))
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
 def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, out_dir,
-                     orders: "dict | None" = None) -> list:
+                     orders: "dict | None" = None, high_info: "pd.DataFrame | None" = None) -> list:
     """Per staining panel, with all cell types in the same graphs: a spots-per-nucleus figure, an
     overview figure, and one PNG per metric. Also writes spot_count_distribution.csv next to
     `out_dir`. Returns the figure paths (spots-per-nucleus first)."""
@@ -776,6 +892,15 @@ def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, 
             path = out_dir / f"{name}_spots_by_compartment.png"
             fig.savefig(path, dpi=150, bbox_inches="tight")
             plt.close(fig)
+            written.append(path)
+
+        # % high cells per channel and compartment, vs the reference condition's cut-off
+        hm = [(f, m) for f in dict.fromkeys(lab_all.loc[lab_all["metric"].isin(FRACTION_METRICS), "feature"])
+              for m in ("high_nucleus", "high_cytoplasm", "high_cell")
+              if ((lab_all["feature"] == f) & (lab_all["metric"] == m)).any()]
+        if hm:
+            path = out_dir / f"{name}_high_cells.png"
+            _high_cells_figure(rsub, hm, t_order, ct_order, header, high_info, path)
             written.append(path)
 
         # average spot size per nucleus (half maximum - independent of spot brightness), one panel per channel

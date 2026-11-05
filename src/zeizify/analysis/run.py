@@ -362,10 +362,23 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
     t_stage = time.monotonic()
 
     # ---- stage 3: tables + statistics ----
-    from .stats import condition_summary, default_orders, long_table, replicate_summary, run_tests, write_superplots
+    from .stats import (add_high_flags, condition_summary, default_orders, long_table, replicate_summary,
+                        resolve_reference, run_tests, write_superplots)
 
     prog("stats", 0, 1, "tables")
     nuclei = pd.DataFrame([n for r in results for n in r.nuclei])
+    for c in ("cell_type", "treatment", "antibody", "replicate"):
+        if c in nuclei:
+            nuclei[c] = nuclei[c].fillna("")
+    # reference condition (e.g. WT · MOCK) and "high" cells relative to it
+    reference, high_info = ("", ""), pd.DataFrame()
+    if len(nuclei):
+        o0 = default_orders(nuclei, params.treatment_order, params.cell_type_order)
+        reference = resolve_reference(o0, params.reference_cell_type, params.reference_treatment)
+        nuclei, high_info = add_high_flags(nuclei, spot_channels, reference, params.high_percentile)
+        high_info.to_csv(adir / "high_thresholds.csv", index=False)
+        log(f"Reference condition: {reference[0]} · {reference[1]} - 'high' cells are above its "
+            f"{params.high_percentile:g}th percentile (high_thresholds.csv).")
     spots = pd.DataFrame([s for r in results for s in r.spots])
     coloc = pd.DataFrame([c for r in results for c in r.coloc])
     fields_df = pd.DataFrame([r.field_row for r in results])
@@ -392,6 +405,8 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
     if orders:
         log("Order: treatments " + ", ".join(orders["treatment"]) + "; cell types "
             + ", ".join(c or "-" for c in orders["cell_type"]))
+    if orders:
+        orders["reference"] = reference
     omni, pairs = run_tests(rep, long, orders) if len(rep) else (pd.DataFrame(), pd.DataFrame())
     rep.to_csv(adir / "replicate_summary.csv", index=False)
     cond.to_csv(adir / "condition_summary.csv", index=False)
@@ -399,7 +414,7 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
     pairs.to_csv(adir / "stats_pairwise.csv", index=False)
     log("Wrote replicate_summary.csv, condition_summary.csv, stats_omnibus.csv, stats_pairwise.csv.")
     prog("stats", 0, 1, "SuperPlots")
-    plots = write_superplots(long, rep, omni, adir / "superplots", orders) if len(rep) else []
+    plots = write_superplots(long, rep, omni, adir / "superplots", orders, high_info) if len(rep) else []
     log(f"Wrote {len(plots)} summary figure(s) under superplots/ and spot_count_distribution.csv.")
     prog("stats", 1, 1, "done")
     timings["stats_s"] = round(time.monotonic() - t_stage, 1)
@@ -411,6 +426,8 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
         "nuclear_channel": nuclear, "spot_channels": spot_channels, "pixel_size_um": ds.px_um,
         "nucleus_method": method, "params": params.to_dict(), "spot_thresholds": spot_floors,
         "cell_method": cell_method, "cell_fields": len(cell_fields),
+        "reference_condition": {"cell_type": reference[0], "treatment": reference[1],
+                                "high_percentile": params.high_percentile},
         "cell_markers": sorted({markers[f.key] for f in cell_fields}),
         "fields_analysed": len(results), "errors": [{"field": k, "error": e} for k, e in errors],
         "nuclei_total": int(len(nuclei)), "nuclei_qc_pass": int(nuclei["qc_pass"].sum()) if len(nuclei) else 0,

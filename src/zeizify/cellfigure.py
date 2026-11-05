@@ -94,6 +94,10 @@ class FigureOptions:
     scale_bar: str = "last"  # "none", "last" (bottom-right panel) or "all"
     scale_bar_label: bool = True
     formats: list[str] = field(default_factory=lambda: ["png", "pdf"])
+    # which cells to show: "" = typical (closest to the condition's medians); else an intensity column
+    # (e.g. "AF594_mean_bgsub") and a quantile: cells around that percentile of the condition (e.g. 0.9 = bright)
+    target_metric: str = ""
+    target_quantile: float = 0.9
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -275,12 +279,20 @@ def _nuclear_ok(ratio: dict, typical: dict) -> bool:
 
 
 def rank_candidates(cd: CellData, cell_type: str, treatment: str, crop_w_um: float, crop_h_um: float,
-                    n: int = 12, cache: "_FieldCache | None" = None) -> pd.DataFrame:
+                    n: int = 12, cache: "_FieldCache | None" = None,
+                    target: "tuple[str, float] | None" = None) -> pd.DataFrame:
     """Up to n candidate nuclei for one condition, best first, with their key values and the
     condition medians (columns '<metric>' and 'median_<metric>'), the tolerance tier that admitted
-    them ('relax') and the fraction of the crop covered by other nuclei ('neighbours')."""
+    them ('relax') and the fraction of the crop covered by other nuclei ('neighbours').
+    With target = (column, q), only the cells between the q - 0.05 and q + 0.05 quantiles of that column
+    are considered (e.g. ("AF594_mean_bgsub", 0.9): bright cells), and they are matched to that
+    subpopulation's own medians."""
     cache = cache or _FieldCache(cd)
     cond = cd.cells[(cd.cells["cell_type"] == cell_type) & (cd.cells["treatment"] == treatment)]
+    if target and target[0] in cond and cond[target[0]].notna().any():
+        col, q = target
+        lo, hi = cond[col].quantile([max(0.0, q - 0.05), min(1.0, q + 0.05)])
+        cond = cond[cond[col].between(lo, hi)]
     key, soft, sizes = _metrics(cd)
     meds = {c: float(np.nanmedian(cond[c])) if cond[c].notna().any() else float("nan") for c in [*key, *soft]}
     iqr = {c: (float(np.nanpercentile(cond[c], 75) - np.nanpercentile(cond[c], 25)) if cond[c].notna().any() else 1.0)
@@ -340,12 +352,12 @@ def describe(row, cd: CellData) -> str:
 
 
 def auto_choices(cd: CellData, conditions: list[tuple[str, str]], crop_w_um: float, crop_h_um: float,
-                 n: int = 12, progress=None) -> dict[tuple[str, str], pd.DataFrame]:
+                 n: int = 12, progress=None, target: "tuple[str, float] | None" = None) -> dict[tuple[str, str], pd.DataFrame]:
     """Ranked candidates for every condition (the first row is the automatic pick)."""
     cache = _FieldCache(cd)
     out = {}
     for i, (ct, t) in enumerate(conditions, start=1):
-        out[(ct, t)] = rank_candidates(cd, ct, t, crop_w_um, crop_h_um, n, cache)
+        out[(ct, t)] = rank_candidates(cd, ct, t, crop_w_um, crop_h_um, n, cache, target)
         if progress:
             progress(i, len(conditions), f"{ct} · {t}")
     return out
@@ -740,8 +752,10 @@ def legend_text(cd: CellData, opts: FigureOptions, rng: dict) -> str:
         "Representative single cells. "
         + (f"Staining: {cd.antibody}. " if cd.antibody else "")
         + ("Each panel shows one nucleus per cell type and treatment, chosen automatically from the QC-passed "
-           "nuclei of that condition as the one closest to the condition's median spot counts, double-positive "
-           "spots, spot size and Pearson's r (Zeizify Analyze). ")
+           "nuclei of that condition"
+           + (f" around the {opts.target_quantile * 100:.0f}th percentile of {target_label(opts.target_metric)}, as the "
+              "one closest to that subpopulation's" if opts.target_metric else " as the one closest to the condition's")
+           + " median spot counts, double-positive spots, spot size and Pearson's r (Zeizify Analyze). ")
         + f"Channels: {', '.join(names)}. Merges are additive overlays of the pseudocolored channels. "
         + "Images are maximum-intensity projections, background-subtracted and linearly scaled; "
         + ("the display range of each channel is identical in all conditions. " if shared
@@ -752,6 +766,26 @@ def legend_text(cd: CellData, opts: FigureOptions, rng: dict) -> str:
     )
     ranges = "; ".join(f"{k}: 0-{v:.0f}" for k, v in rng.items() if isinstance(k, str))
     return txt + ("\n\nDisplay ranges (background-subtracted grey levels): " + ranges if ranges else "") + "\n"
+
+
+def target_label(col: str) -> str:
+    """'AF594_mean_bgsub' -> 'AF594 nuclear intensity'."""
+    for suffix, what in (("_cell_mean_bgsub", "whole-cell intensity"), ("_cyto_mean_bgsub", "cytoplasmic intensity"),
+                         ("_mean_bgsub", "nuclear intensity")):
+        if col.endswith(suffix):
+            return f"{col[:-len(suffix)]} {what}"
+    return col
+
+
+def target_columns(cd: CellData) -> list[str]:
+    """Intensity columns a figure can target (bright / dim cells)."""
+    out = []
+    for c in cd.signal:
+        for suffix in ("_mean_bgsub", "_cyto_mean_bgsub", "_cell_mean_bgsub"):
+            col = f"{c}{suffix}"
+            if col in cd.cells and cd.cells[col].notna().any():
+                out.append(col)
+    return out
 
 
 def default_figure_panels(channels: list[str]) -> list[Panel]:

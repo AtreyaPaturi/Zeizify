@@ -210,6 +210,19 @@ independent samples. Each metric is summarised per replicate (the median of its 
 - **Cell types** (e.g. WT vs KO) are compared within each staining panel and treatment, with the same
   pairwise statistics (`compare = cell_type` in `stats_pairwise.csv`; wild type is the reference).
 
+- **Reference condition.** One condition, chosen as cell type + treatment (default: the wild type and the
+  control, e.g. WT · MOCK), is the common reference. Every other condition, of every cell type, is compared
+  with it (`compare = vs_reference` in `stats_pairwise.csv`), in addition to the within-cell-type and
+  within-treatment comparisons.
+- **High cells.** Per channel, a cell is "high" when its nuclear, cytoplasmic or whole-cell intensity
+  (background-subtracted) is above a percentile (default 95th) of the reference condition's cells of the
+  same staining panel. The cut-offs are in `high_thresholds.csv`; per cell, `<ch>_high_nucleus`,
+  `_high_cytoplasm` and `_high_cell` are 100 or 0. Per replicate, the outputs are:
+  - the % of high cells (`high_*` metrics in the summaries, tested like the others);
+  - `<panel>_high_cells.png`, a 100 % stacked bar per condition.
+
+  This captures phenotypes that live in a subpopulation (e.g. more very bright cells), which a median hides.
+
 With fewer than two replicates per treatment no test is performed and only effect sizes are reported.
 **Figures** (`superplots/`), per staining panel, with all cell types in the same graph (treatments on the x
 axis, cell types side by side, one color per cell type):

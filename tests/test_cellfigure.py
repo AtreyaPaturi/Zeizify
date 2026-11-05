@@ -169,3 +169,14 @@ def test_closest_cells_offered_when_nothing_fits(analysed, monkeypatch):
     r = cf.rank_candidates(cd, "WT", "Mock", 20, 20, n=2)
     assert len(r) == 2 and (r["relax"] == math.inf).all()
     assert "outside the usual tolerance" in cf.describe(r.iloc[0], cd)
+
+
+def test_target_picks_cells_around_a_percentile(analysed):
+    cd = cf.load_cells(analysed)
+    col = "AF488_mean_bgsub"
+    cond = cd.cells[(cd.cells["cell_type"] == "WT") & (cd.cells["treatment"] == "Mock")]
+    lo, hi = cond[col].quantile([0.85, 0.95])
+    r = cf.rank_candidates(cd, "WT", "Mock", 20, 20, n=3, target=(col, 0.9))
+    assert len(r) and r[col].between(lo, hi).all()
+    assert cf.target_label(col) == "AF488 nuclear intensity"
+    assert col in cf.target_columns(cd)

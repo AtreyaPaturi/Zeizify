@@ -328,6 +328,13 @@ class FigurePage(ctk.CTkFrame):
         self.tr_order, self.tr_labels = _entry(r, "", 220), _entry(r, "", 300)
         self.tr_order.pack(side="left")
         self.tr_labels.pack(side="left", padx=8)
+        r = _row(c, "Cells to show", "Typical = closest to the condition's medians; or cells around a percentile "
+                                     "of an intensity, e.g. 90 = bright cells")
+        self.target = _menu(r, ["Typical cell (median)"], 300)
+        self.target.pack(side="left")
+        self.target_q = _entry(r, 90, 50)
+        self.target_q.pack(side="left", padx=8)
+        ctk.CTkLabel(r, text="th percentile", font=T.font(11), text_color=T.MUTED).pack(side="left")
         r = _row(c, "Crop size (µm)", "width × height, centred on the nucleus")
         self.crop_w, self.crop_h = _entry(r, 30, 60), _entry(r, 30, 60)
         self.crop_w.pack(side="left")
@@ -486,6 +493,12 @@ class FigurePage(ctk.CTkFrame):
                 cb = _check(row, v or "(none)", True)
                 cb.pack(side="left", padx=(0, 12))
                 checks[v] = cb
+        from ..cellfigure import target_columns, target_label
+
+        self._targets = {"Typical cell (median)": ""} | {f"By {target_label(col)}": col for col in target_columns(cd)}
+        self.target.configure(values=list(self._targets))
+        if self.target.get() not in self._targets:
+            self.target.set("Typical cell (median)")
         for e, v in ((self.ct_order, ", ".join(cts)), (self.tr_order, ", ".join(trs))):
             e.delete(0, "end")
             e.insert(0, v)
@@ -566,7 +579,9 @@ class FigurePage(ctk.CTkFrame):
                 contrast=CONTRAST[self.contrast.get()], saturated_pct=float(self.sat.get()), max_override=maxes,
                 outline=OUTLINE[self.outline.get()], scale_bar_um=float(self.sb_len.get()),
                 scale_bar=SCALEBAR[self.sb_where.get()], scale_bar_label=bool(self.sb_label.get()),
-                formats=[f for f, cb in self.fmt_checks.items() if cb.get()] or ["png"])
+                formats=[f for f, cb in self.fmt_checks.items() if cb.get()] or ["png"],
+                target_metric=getattr(self, "_targets", {}).get(self.target.get(), ""),
+                target_quantile=float(self.target_q.get()) / 100)
         except ValueError as exc:
             self.app.toast(f"Check the settings: {exc}", kind="warning")
             return None
@@ -593,7 +608,8 @@ class FigurePage(ctk.CTkFrame):
 
         def work():
             with self.lock:
-                return auto_choices(self.cd, conds, opts.crop_w_um, opts.crop_h_um, n=12, progress=progress)
+                return auto_choices(self.cd, conds, opts.crop_w_um, opts.crop_h_um, n=12, progress=progress,
+                                    target=(opts.target_metric, opts.target_quantile) if opts.target_metric else None)
 
         def done(res):
             self.candidates = res

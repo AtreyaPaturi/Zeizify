@@ -3,6 +3,23 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.14.0] - 2026-11-05
+
+### Added
+- **Reference condition**, chosen as cell type + treatment: drop-downs on the Analyze page, `--reference
+  "WT,MOCK"`. The default is the wild type + the control. Every condition of every cell type is compared
+  with it (`compare = vs_reference` in `stats_pairwise.csv`).
+- **High cells**: cells brighter than a percentile (default 95th; `--high-percentile`) of the reference
+  condition's cells, for nuclear, cytoplasmic and whole-cell intensity.
+  - Per cell: `<ch>_high_nucleus` / `_high_cytoplasm` / `_high_cell`.
+  - Per replicate: the % of high cells, in the summaries and tests.
+  - Cut-offs in `high_thresholds.csv`; `superplots/<panel>_high_cells.png` shows 100 % stacked bars.
+- Nuclear, cytoplasmic and whole-cell intensity SuperPlots in the overview (`mean_bgsub`, `cyto_mean_bgsub`,
+  `cell_mean_bgsub`).
+- Figures: **Cells to show**, either the typical cell (median) or cells around a percentile of a chosen
+  intensity (e.g. the 90th percentile of nuclear cyclin A: bright cells), matched to that subpopulation's own
+  values. `zeizify figure --target AF594_mean_bgsub:90`.
+
 ## [1.13.0] - 2026-11-05
 
 ### Added

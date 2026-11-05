@@ -200,6 +200,21 @@ class AnalyzePage(ctk.CTkFrame):
         r = _row(c, "Cell-type order", "comma-separated; blank = wild type first - all cell types share each graph")
         self.ct_order = _entry(r, "", 420)
         self.ct_order.pack(side="left")
+        r = _row(c, "Reference condition", "every condition is compared with it; it also sets the 'high' cut-off")
+        self.ref_ct = ctk.CTkOptionMenu(r, values=["Auto (wild type)"], width=180, height=30, corner_radius=8,
+                                        font=T.font(12), fg_color=T.SURFACE_ALT, button_color=T.SURFACE_ALT,
+                                        button_hover_color=T.BORDER, text_color=T.TEXT, dropdown_font=T.font(12))
+        self.ref_ct.set("Auto (wild type)")
+        self.ref_ct.pack(side="left")
+        self.ref_t = ctk.CTkOptionMenu(r, values=["Auto (control)"], width=180, height=30, corner_radius=8,
+                                       font=T.font(12), fg_color=T.SURFACE_ALT, button_color=T.SURFACE_ALT,
+                                       button_hover_color=T.BORDER, text_color=T.TEXT, dropdown_font=T.font(12))
+        self.ref_t.set("Auto (control)")
+        self.ref_t.pack(side="left", padx=8)
+        r = _row(c, "'High' cells", "above this percentile of the reference condition's cells")
+        self.high_pct = _entry(r, d.high_percentile, 60)
+        self.high_pct.pack(side="left")
+        ctk.CTkLabel(r, text="th percentile", font=T.font(11), text_color=T.MUTED).pack(side="left", padx=6)
         r = _row(c, "Parallel workers", "CPU processes for measurement")
         self.workers = _entry(r, d.workers)
         self.workers.pack(side="left")
@@ -297,6 +312,17 @@ class AnalyzePage(ctk.CTkFrame):
         if self.cell_marker.get() not in values:
             self.cell_marker.set(values[0])
         self.cell_info.configure(text=self._describe_cells(ds))
+        from ..analysis.stats import is_control, is_wildtype, level_order
+        import pandas as pd
+
+        meta = pd.DataFrame([{"cell_type": f.cell_type, "treatment": f.treatment, "well": f.well} for f in ds.fields])
+        cts = level_order(meta, "cell_type", first=is_wildtype)
+        trs = level_order(meta, "treatment", first=is_control)
+        for menu, auto, values in ((self.ref_ct, f"Auto (wild type: {cts[0] if cts else '-'})", cts),
+                                   (self.ref_t, f"Auto (control: {trs[0] if trs else '-'})", trs)):
+            menu.configure(values=[auto, *values])
+            if menu.get() not in values:
+                menu.set(auto)
         self.field_menu.configure(values=[f.key for f in ds.fields])
         self.field_menu.set(ds.fields[0].key if ds.fields else "")
 
@@ -321,6 +347,9 @@ class AnalyzePage(ctk.CTkFrame):
                 coloc_randomizations=int(self.rand.get()), replicate_column=REPLICATE_CHOICES[self.rep.get()],
                 workers=max(1, int(self.workers.get())), qc_overlays=bool(self.qc.get()),
                 cell_segmentation=self._marker_choice()[0], cell_marker=self._marker_choice()[1],
+                reference_cell_type="" if self.ref_ct.get().startswith("Auto") else self.ref_ct.get(),
+                reference_treatment="" if self.ref_t.get().startswith("Auto") else self.ref_t.get(),
+                high_percentile=float(self.high_pct.get()),
                 cell_method=CELL_METHODS[self.cell_method.get()], cell_diameter_um=float(self.cell_diam.get()),
                 exclude_border_cells=bool(self.cell_border.get()),
                 treatment_order=_csv(self.t_order.get()), cell_type_order=_csv(self.ct_order.get()),

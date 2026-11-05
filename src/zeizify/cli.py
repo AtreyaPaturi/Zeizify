@@ -133,6 +133,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="comma-separated treatment order in plots and tests (default: control, then plate-map order)")
     a.add_argument("--cell-type-order", default="", metavar="A,B,...",
                    help="comma-separated cell-type order (default: wild type, then plate-map order)")
+    a.add_argument("--reference", default="", metavar="CELLTYPE,TREATMENT",
+                   help="condition every other one is compared with and that defines 'high' cells (default: wild type, control)")
+    a.add_argument("--high-percentile", type=float, default=d.high_percentile,
+                   help="a cell is 'high' above this percentile of the reference condition's cells")
     a.add_argument("--workers", type=int, default=d.workers)
     a.add_argument("--no-qc", action="store_true", help="skip QC overlay images")
 
@@ -164,6 +168,8 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--max", action="append", default=[], metavar="CHANNEL=VALUE", help="fixed display maximum")
     g.add_argument("--outline", choices=["none", "nuclear", "all"], default="nuclear")
     g.add_argument("--scale-bar", type=float, default=5.0, metavar="UM", help="0 = none")
+    g.add_argument("--target", default="", metavar="COLUMN:PERCENTILE",
+                   help="show cells around a percentile of an intensity, e.g. AF594_mean_bgsub:90 (default: typical cells)")
     g.add_argument("--pick", action="append", default=[], metavar="CELLTYPE,TREATMENT=WELL,FIELD,NUCLEUS",
                    help="use this nucleus instead of the automatic pick (repeatable)")
     return p
@@ -193,7 +199,8 @@ def _figure(args) -> int:
         rows=args.rows, blocks=args.blocks, width_in=width, dpi=args.dpi, font=args.font, font_size=args.font_size,
         contrast=args.contrast, saturated_pct=args.saturated, max_override={k: v for k, v in _fixed(args.max).items() if v},
         outline=args.outline, scale_bar_um=args.scale_bar, scale_bar="last" if args.scale_bar > 0 else "none",
-        formats=_csv(args.format))
+        formats=_csv(args.format),
+        target_metric=args.target.partition(":")[0], target_quantile=float(args.target.partition(":")[2] or 90) / 100)
     conds = [(c, t) for c in cts for t in trs if (c, t) in set(cd.conditions())]
     manual = {}
     for it in args.pick:
@@ -202,7 +209,8 @@ def _figure(args) -> int:
         well, fld, nid = [x.strip() for x in where.split(",")]
         manual[(ct.strip(), t.strip())] = cf.CellChoice(ct.strip(), t.strip(), well, fld, int(nid), "manual")
     ranked = cf.auto_choices(cd, [k for k in conds if k not in manual], opts.crop_w_um, opts.crop_h_um, n=5,
-                             progress=lambda i, n, item: print(f"  ranked {i}/{n}: {item}"))
+                             progress=lambda i, n, item: print(f"  ranked {i}/{n}: {item}"),
+                             target=(opts.target_metric, opts.target_quantile) if opts.target_metric else None)
     choices = {}
     for k in conds:
         if k in manual:
@@ -248,6 +256,8 @@ def _analyze(args) -> int:
         exclude_border_nuclei=not args.keep_border_nuclei, use_gpu=not args.cpu,
         spot_min_diameter_um=args.spot_diameter[0], spot_max_diameter_um=args.spot_diameter[1],
         spot_sensitivity=args.sensitivity, spot_declump=not args.no_declump, spot_compartments=_compartments(args),
+        reference_cell_type=args.reference.partition(",")[0].strip(),
+        reference_treatment=args.reference.partition(",")[2].strip(), high_percentile=args.high_percentile,
         coloc_randomizations=args.randomizations, cell_segmentation=args.cells, cell_marker=args.cell_marker,
         cell_method=args.cell_method, cell_diameter_um=args.cell_diameter, exclude_border_cells=not args.keep_border_cells,
         replicate_column=args.replicate_column, workers=args.workers, qc_overlays=not args.no_qc,

@@ -196,6 +196,13 @@ HELP: dict[str, dict] = {
             ("Statistics", [
                 "Each metric is summarised per replicate (median of its nuclei) and replicates are compared: "
                 "Welch ANOVA and Games-Howell post hoc, with Benjamini-Hochberg q-values (SuperPlots, Lord 2020).",
+                "Reference condition: choose the cell type and treatment every condition is compared with (Auto = "
+                "the wild type and the control, e.g. WT · MOCK). stats_pairwise.csv then has a 'vs_reference' row "
+                "for every other condition.",
+                "'High' cells: brighter than the chosen percentile (default 95th) of the reference condition's cells, "
+                "for nuclear, cytoplasmic and whole-cell intensity. Reported as % of cells per condition "
+                "(<panel>_high_cells.png); the cut-offs are in high_thresholds.csv. Use it when a phenotype is a "
+                "subpopulation of very bright cells.",
                 "A replicate is a well by default. Add a 'Replicate' column to the plate map for biological "
                 "replicates; 'Field' treats fields as technical replicates and overstates certainty.",
                 "With one well per condition no p-values are possible; effect sizes (Cliff's delta on nuclei) "
@@ -236,6 +243,9 @@ HELP: dict[str, dict] = {
                 "intensity is not used.",
                 "If no cell is within the usual tolerances, the closest cells are still offered, marked 'closest "
                 "available - outside the usual tolerance'.",
+                "Cells to show: 'Typical cell (median)' picks cells closest to the condition's medians. To show a "
+                "subpopulation, choose an intensity (e.g. AF594 nuclear intensity) and a percentile: 90 picks bright "
+                "cells around the condition's 90th percentile, matched to that subpopulation's own values.",
                 "Each condition has a ranked list (#1 = automatic). Pick another entry to swap the cell - the "
                 "thumbnail and the values vs the condition median update. cells.csv records every choice.",
                 "Choose on image… shows the whole field: step through the condition's fields (◀ ▶), switch the "
