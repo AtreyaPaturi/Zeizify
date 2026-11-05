@@ -11,9 +11,11 @@ Choosing the cells
         nothing fits, and an isolated cell is preferred over a slightly closer match;
       * score: weighted robust distance (|value - median| / IQR) over Pearson's r, spot size,
         intensity CV and mean intensity per channel, nuclear area and DAPI ratio;
-      * geometry: the whole nucleus inside the crop, few other nuclei in it, and at least one
-        signal channel >= 3 x brighter inside the nucleus than outside (rejects rounded mitotic
-        cells whose signal fills the cell).
+      * geometry: the whole nucleus inside the crop and few other nuclei in it; for stains that are
+        clearly nuclear in the condition (typical nuclear / outside ratio >= 2), the cell's ratio must
+        be at least half the typical one (rejects rounded mitotic cells whose signal fills the cell);
+        cytoplasmic or diffuse stains are not checked;
+      * if no cell is within the tolerances, the closest cells are offered (relax = inf).
     Any candidate can replace the automatic pick (manual choice).
 
 Display
@@ -29,6 +31,7 @@ legend) and figure_settings.json.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -222,30 +225,53 @@ def _crop(arr: np.ndarray, y0: int, x0: int, h: int, w: int, fill=0) -> np.ndarr
     return out
 
 
-def _geometry_ok(cd: CellData, cache: _FieldCache, r, h: int, w: int, neighbours_max: float) -> "tuple[bool, float]":
+def _geometry(cd: CellData, cache: _FieldCache, r, h: int, w: int) -> "tuple[bool, float, dict]":
+    """(whole nucleus inside the crop, fraction of the crop covered by other nuclei, nuclear / outside
+    mean intensity per signal channel)."""
     fi, mask, imgs, bg = cache.get(r["well"], r["field"])
     px = cd.ds.px_um
     cy, cx = int(round(r["centroid_y_um"] / px)), int(round(r["centroid_x_um"] / px))
     y0, x0 = _window(cy, cx, h, w)
     if y0 < 0 or x0 < 0 or y0 + h > mask.shape[0] or x0 + w > mask.shape[1]:
-        return False, 1.0
+        return False, 1.0, {}
     crop = mask[y0:y0 + h, x0:x0 + w]
     own = crop == int(r["nucleus_id"])
     if not own.any():
-        return False, 1.0
+        return False, 1.0, {}
     other = float(((crop > 0) & ~own).mean())
     m = 0.04 * min(h, w)
     rr, cc = np.nonzero(own)
-    if not (rr.min() > m and cc.min() > m and rr.max() < h - m and cc.max() < w - m) or other >= neighbours_max:
-        return False, other
-    enriched = False
+    inside = bool(rr.min() > m and cc.min() > m and rr.max() < h - m and cc.max() < w - m)
+    ratio = {}
     for c in cd.signal:
         sig = np.clip(imgs[c][y0:y0 + h, x0:x0 + w] - bg[c], 0, None)
         outside = sig[crop == 0]
-        if outside.size and sig[own].mean() >= 3 * max(float(outside.mean()), 1e-9):
-            enriched = True
-            break
-    return enriched, other
+        ratio[c] = float(sig[own].mean() / max(float(outside.mean()), 1e-9)) if outside.size else float("nan")
+    return inside, other, ratio
+
+
+def _typical_ratios(cd: CellData, cache: _FieldCache, cond: pd.DataFrame, h: int, w: int, n: int = 40) -> dict:
+    """Median nuclear / outside intensity ratio per signal channel over a sample of the condition's nuclei."""
+    vals: dict[str, list] = {c: [] for c in cd.signal}
+    sample = cond.sort_values(["well", "field", "nucleus_id"]).iloc[:: max(1, len(cond) // n)]
+    for _, r in sample.iterrows():
+        inside, other, ratio = _geometry(cd, cache, r, h, w)
+        if inside:
+            for c, v in ratio.items():
+                if np.isfinite(v):
+                    vals[c].append(v)
+    return {c: float(np.median(v)) for c, v in vals.items() if v}
+
+
+def _nuclear_ok(ratio: dict, typical: dict) -> bool:
+    """A cell whose nuclear stain is not concentrated in its nucleus the way it is in the condition's other
+    cells (e.g. a rounded mitotic cell, signal spread through the cell) is skipped. Only channels that are
+    clearly nuclear in this condition (typical ratio >= 2) are checked, so cytoplasmic or diffuse stains
+    (F-actin, ...) never reject a cell."""
+    nuclear = [c for c, t in typical.items() if t >= 2.0]
+    if not nuclear:
+        return True
+    return any(ratio.get(c, 0.0) >= 0.5 * typical[c] for c in nuclear)
 
 
 def rank_candidates(cd: CellData, cell_type: str, treatment: str, crop_w_um: float, crop_h_um: float,
@@ -266,23 +292,25 @@ def rank_candidates(cd: CellData, cell_type: str, treatment: str, crop_w_um: flo
     for c, wt in soft.items():
         score += wt * np.nan_to_num(np.abs(base[c].to_numpy(dtype=float) - meds[c]) / iqr[c], nan=3.0)
     base = base.assign(score=score)
+    typical = _typical_ratios(cd, cache, cond, h, w) if len(cond) else {}
     picked, seen = [], set()
-    for relax, neigh in TIERS:
+    # last resort: the closest cells regardless of the tolerances (relax = inf), so a condition is never empty
+    for relax, neigh in (*TIERS, (math.inf, 0.15)):
         d = base
-        for c in key:
+        for c in key if np.isfinite(relax) else ():
             if np.isfinite(meds[c]):
                 d = d[(d[c] - meds[c]).abs() <= relax * max(1.0, 0.15 * meds[c])]
-        for s in sizes:
+        for s in sizes if np.isfinite(relax) else ():
             if np.isfinite(meds[s]):
                 d = d[d[s].isna() | ((d[s] - meds[s]).abs() <= relax * 0.3 * meds[s])]
-        if "pearson" in meds and np.isfinite(meds["pearson"]):
+        if np.isfinite(relax) and "pearson" in meds and np.isfinite(meds["pearson"]):
             d = d[(d["pearson"] - meds["pearson"]).abs() <= relax * 0.1]
         for _, r in d.sort_values("score").head(200).iterrows():
             ident = (r["well"], r["field"], int(r["nucleus_id"]))
             if ident in seen:
                 continue
-            ok, other = _geometry_ok(cd, cache, r, h, w, neigh)
-            if ok:
+            inside, other, ratio = _geometry(cd, cache, r, h, w)
+            if inside and other < neigh and _nuclear_ok(ratio, typical):
                 seen.add(ident)
                 picked.append({**r.to_dict(), "relax": relax, "neighbours": round(other, 3)})
                 if len(picked) >= n:
@@ -306,6 +334,8 @@ def describe(row, cd: CellData) -> str:
         parts.append(f"double {int(row['n_double'])} ({row['median_n_double']:.0f})")
     if "pearson" in row and np.isfinite(row.get("pearson", np.nan)):
         parts.append(f"r {row['pearson']:.2f} ({row.get('median_pearson', np.nan):.2f})")
+    if row.get("relax") == math.inf:
+        parts.append("closest available - outside the usual tolerance")
     return "  ·  ".join(parts)
 
 

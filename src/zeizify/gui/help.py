@@ -211,8 +211,12 @@ HELP: dict[str, dict] = {
                 "For each condition the cells are ranked by how closely they match that condition's medians: spot "
                 "counts per channel, double-positive spots, Pearson's r and spot size must be close; intensity, CV "
                 "and nuclear size break ties.",
-                "The whole nucleus must fit in the crop, isolated cells are preferred, and the signal must sit in "
-                "the nucleus (cells whose signal fills the whole cell are skipped). DAPI intensity is not used.",
+                "The whole nucleus must fit in the crop and isolated cells are preferred. For stains that are clearly "
+                "nuclear in a condition (e.g. PML), cells whose signal fills the whole cell (rounded mitotic cells) "
+                "are skipped; cytoplasmic or diffuse stains (e.g. F-actin) are never used to reject a cell. DAPI "
+                "intensity is not used.",
+                "If no cell is within the usual tolerances, the closest cells are still offered, marked 'closest "
+                "available - outside the usual tolerance'.",
                 "Each condition has a ranked list (#1 = automatic). Pick another entry to swap the cell - the "
                 "thumbnail and the values vs the condition median update. cells.csv records every choice.",
                 "Choose on image… shows the whole field: step through the condition's fields (◀ ▶), switch the "

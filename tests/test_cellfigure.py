@@ -149,3 +149,23 @@ def test_staining_panels_are_never_pooled(tmp_path):
     assert r1["median_n_double"].iloc[0] > r2["median_n_double"].iloc[0]
     with pytest.raises(ValueError, match="Unknown staining panel"):
         cf.load_cells(out, "nope")
+
+
+def test_nuclear_check_only_for_nuclear_stains():
+    # cytoplasmic / diffuse stains (F-actin ~0.6, cyclin A ~1.7): never reject a cell
+    assert cf._nuclear_ok({"A": 0.2, "B": 0.4}, {"A": 0.6, "B": 1.7})
+    # a nuclear stain (typical 6x): a cell whose signal is spread through the cell (1x) is skipped ...
+    assert not cf._nuclear_ok({"A": 1.0, "B": 0.5}, {"A": 6.0, "B": 0.8})
+    # ... one at half the typical ratio or more is kept
+    assert cf._nuclear_ok({"A": 3.1, "B": 0.5}, {"A": 6.0, "B": 0.8})
+    assert cf._nuclear_ok({}, {})
+
+
+def test_closest_cells_offered_when_nothing_fits(analysed):
+    import math
+
+    cd = cf.load_cells(analysed)
+    cd.cells.loc[:, "AF488_spots_n"] = np.arange(len(cd.cells)) * 50  # no cell anywhere near the median
+    r = cf.rank_candidates(cd, "WT", "Mock", 20, 20, n=2)
+    assert len(r) == 2 and (r["relax"] == math.inf).all()
+    assert "outside the usual tolerance" in cf.describe(r.iloc[0], cd)

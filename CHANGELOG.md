@@ -3,6 +3,18 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.11.2] - 2026-11-05
+
+### Fixed
+- Figures: "no suitable cell" for conditions stained with cytoplasmic or diffuse markers (e.g. F-actin and
+  cyclin A). The check against rounded mitotic cells required one channel to be >= 3 x brighter in the
+  nucleus than around it, which rejected about 80 % of these cells. The check is now relative and selective:
+  - only stains that are clearly nuclear in that condition (typical nuclear / outside ratio >= 2) are
+    checked;
+  - a cell is skipped only when its ratio is below half the typical one.
+- When no cell matches within the tolerances, the closest cells are offered, marked "closest available -
+  outside the usual tolerance", instead of none.
+
 ## [1.11.1] - 2026-11-05
 
 ### Fixed
