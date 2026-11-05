@@ -39,6 +39,9 @@ class AnalysisParams:
     spot_max_diameter_um: float = 3.0
     spot_sensitivity: float = 6.0  # noise floor: median + k * MAD of the top-hat nucleoplasm (lower = more spots)
     spot_declump: bool = True  # split touching spots at intensity saddles (watershed)
+    # where spots are detected and counted: "nucleus" and/or "cytoplasm" (cytoplasm needs cell boundaries,
+    # i.e. a cell-boundary stain such as F-actin in the field)
+    spot_compartments: list[str] = field(default_factory=lambda: ["nucleus"])
     # Channels listed here use one brightness floor for every well instead of the per-nucleus threshold
     # alone: spots whose mean top-hat intensity is below it are dropped. 0 = automatic (log-Otsu on the
     # spot brightness pooled over all wells). Use for stains whose bodies disappear in some conditions

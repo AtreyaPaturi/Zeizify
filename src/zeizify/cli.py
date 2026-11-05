@@ -113,6 +113,8 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--sensitivity", type=float, default=d.spot_sensitivity,
                    help="spot noise floor in MADs (lower = more spots)")
     a.add_argument("--no-declump", action="store_true")
+    a.add_argument("--spots-in", default="nucleus", metavar="nucleus,cytoplasm",
+                   help="where to detect and count spots: nucleus, cytoplasm, or both (cytoplasm needs cell boundaries)")
     a.add_argument("--fixed-threshold", action="append", default=[], metavar="CHANNEL[=VALUE]",
                    help="one spot brightness floor for every well in CHANNEL (repeatable); VALUE in top-hat "
                         "intensity, omitted = automatic. For stains whose bodies vanish in some conditions")
@@ -228,6 +230,14 @@ def _fixed(items: list[str]) -> dict[str, float]:
     return out
 
 
+def _compartments(args) -> list[str]:
+    out = _csv(args.spots_in.lower().replace("both", "nucleus,cytoplasm"))
+    bad = [x for x in out if x not in ("nucleus", "cytoplasm")]
+    if bad or not out:
+        raise SystemExit(f"--spots-in expects nucleus, cytoplasm or both, got {args.spots_in!r}")
+    return out
+
+
 def _analyze(args) -> int:
     from .analysis.params import AnalysisParams
     from .analysis.run import run_analysis
@@ -237,7 +247,7 @@ def _analyze(args) -> int:
         nucleus_method=args.method, nucleus_diameter_um=args.nucleus_diameter,
         exclude_border_nuclei=not args.keep_border_nuclei, use_gpu=not args.cpu,
         spot_min_diameter_um=args.spot_diameter[0], spot_max_diameter_um=args.spot_diameter[1],
-        spot_sensitivity=args.sensitivity, spot_declump=not args.no_declump,
+        spot_sensitivity=args.sensitivity, spot_declump=not args.no_declump, spot_compartments=_compartments(args),
         coloc_randomizations=args.randomizations, cell_segmentation=args.cells, cell_marker=args.cell_marker,
         cell_method=args.cell_method, cell_diameter_um=args.cell_diameter, exclude_border_cells=not args.keep_border_cells,
         replicate_column=args.replicate_column, workers=args.workers, qc_overlays=not args.no_qc,

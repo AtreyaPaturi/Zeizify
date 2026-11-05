@@ -105,6 +105,23 @@ For each nucleus and channel:
 
 Each spot is assigned to its parent nucleus, the equivalent of CellProfiler's RelateObjects.
 
+**Compartments.** Spots can be detected in the nucleus, in the cytoplasm, or both (`spot_compartments`;
+*Quantify spots in* on the Analyze page). Cytoplasmic spots need cell boundaries (section 1b). They are
+detected in each cell's cytoplasm with the same steps as in a nucleus: top-hat, per-cell threshold with the
+noise floor, declumping, size window and any fixed brightness floor. Per cell, the outputs are:
+- `<ch>_cyto_spots_n`, `<ch>_cyto_spots_area_um2`, `<ch>_cyto_spots_area_frac`,
+  `<ch>_cyto_spot_mean_area_halfmax_um2` and `<ch>_cyto_spot_mean_intensity`;
+- with both compartments, `<ch>_cell_spots_n`: nucleus + cytoplasm.
+
+`spots.csv` has a `compartment` column. With the nucleus not selected, the nuclear spot columns, and the
+object colocalization that needs nuclear spots, are left empty. `<panel>_spots_by_compartment.png` shows
+spots per cell in the nucleus, the cytoplasm and the whole cell as SuperPlots, one row per channel.
+
+A diffuse cytoplasmic protein can produce many faint, near-minimum-size "spots": the per-cell threshold
+finds the brightest grains, just as it does in a nucleus. Check the QC overlays and
+`qc/spot_brightness.png`, and use the fixed brightness floor (section 2, step 4) when the counts are not
+real bodies.
+
 ## 3. Measurements
 
 **Per spot** (`spots.csv`): area, equivalent diameter, eccentricity, solidity, mean / max / integrated

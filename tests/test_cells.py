@@ -150,3 +150,79 @@ def test_cells_absent_when_off(tmp_path):
     res = run_analysis(out, AnalysisParams(nucleus_method="classical", cell_segmentation="off", cell_marker="AF488",
                                            workers=1, spot_min_diameter_um=0.5, qc_overlays=False), log=lambda s: None)
     assert "cyto_area_um2" not in pd.read_csv(res.analysis_dir / "nuclei.csv")
+
+
+def _with_cyto_spots(tmp_path, n_cyto=(4, 6, 8, 3, 5, 7, 2, 9, 6)):
+    """Field A1 P1: cell bodies in AF488 (F-actin) and n_cyto[k] bright spots in the cytoplasm of cell k in AF594."""
+    from zeizify.analysis.io import load_dataset
+
+    out = tmp_path / "o"
+    write_zeizify_output(out, [{"well": "A1", "field": "P1", "treatment": "Mock", "seed": 1, "shared": 0.5}])
+    fi = load_dataset(out).fields[0]
+    truth = _cell_bodies()
+    tifffile.imwrite(fi.channels["AF488"], _marker(truth))
+    b = tifffile.imread(fi.channels["AF594"]).astype(np.float64)
+    yy, xx = np.mgrid[-8:9, -8:9]
+    blob = 3000 * np.exp(-(yy ** 2 + xx ** 2) / (2 * 1.6 ** 2))
+    for (cy, cx), k in zip(CENTERS, n_cyto):
+        for i in range(k):  # on a ring between the nucleus (r <= 30 px) and the cell edge (95 px)
+            ang = 2 * np.pi * i / k
+            y, x = int(cy + 62 * np.sin(ang)), int(cx + 62 * np.cos(ang))
+            b[y - 8:y + 9, x - 8:x + 9] += blob
+    tifffile.imwrite(fi.channels["AF594"], np.clip(b, 0, 65535).astype(np.uint16))
+    return out, fi, truth, list(n_cyto)
+
+
+def _grid_sorted(df: pd.DataFrame) -> pd.DataFrame:
+    """Nuclei in the order of CENTERS (row by row of the 3 x 3 grid)."""
+    row = ((df["centroid_y_um"] / PX - 110) / 210).round()
+    col = ((df["centroid_x_um"] / PX - 110) / 210).round()
+    return df.assign(_r=row, _c=col).sort_values(["_r", "_c"])
+
+
+def test_spots_counted_per_compartment(tmp_path):
+    from zeizify.analysis.measure import measure_field
+
+    out, fi, truth, n_cyto = _with_cyto_spots(tmp_path)
+    dapi = tifffile.imread(fi.channels["DAPI"])
+    nuclei = segment_nuclei(dapi, P, PX, "classical")
+    cells = segment_cells(_marker(truth), dapi, nuclei, P, PX, "classical")
+    both = AnalysisParams(**{**P.to_dict(), "spot_compartments": ["nucleus", "cytoplasm"]})
+    r = measure_field(fi, nuclei, "DAPI", ["AF594"], both, PX, cells=cells, cell_marker="AF488")
+    df = _grid_sorted(pd.DataFrame(r.nuclei))
+    assert df["AF594_cyto_spots_n"].tolist() == n_cyto  # exactly the planted cytoplasmic spots
+    assert (df["AF594_cell_spots_n"] == df["AF594_spots_n"] + df["AF594_cyto_spots_n"]).all()
+    assert (df["AF594_spots_n"] > 0).all()  # the synthetic nuclear spots are still found
+    sp = pd.DataFrame(r.spots)
+    assert set(sp["compartment"]) == {"nucleus", "cytoplasm"} and (sp["compartment"] == "cytoplasm").sum() == sum(n_cyto)
+    # cytoplasm only: nuclear spot columns are empty, the cytoplasmic count is unchanged
+    cyto_only = AnalysisParams(**{**P.to_dict(), "spot_compartments": ["cytoplasm"]})
+    r2 = measure_field(fi, nuclei, "DAPI", ["AF594"], cyto_only, PX, cells=cells, cell_marker="AF488")
+    d2 = _grid_sorted(pd.DataFrame(r2.nuclei))
+    assert d2["AF594_spots_n"].isna().all() and d2["AF594_cell_spots_n"].isna().all()
+    assert d2["AF594_cyto_spots_n"].tolist() == n_cyto
+    assert set(pd.DataFrame(r2.spots)["compartment"]) == {"cytoplasm"}
+
+
+def test_compartment_graphs_written(tmp_path):
+    from zeizify.analysis.run import run_analysis
+
+    out, fi, truth, n_cyto = _with_cyto_spots(tmp_path)
+    rep = out / "intensity_report.csv"
+    rows = list(csv.DictReader(open(rep, encoding="utf-8")))
+    for r in rows:
+        if r["Channel"] == "AF488":
+            r["Stain"] = "F-Actin"
+    with open(rep, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0]))
+        w.writeheader()
+        w.writerows(rows)
+    res = run_analysis(out, AnalysisParams(nucleus_method="classical", cell_method="classical", workers=1,
+                                           spot_min_diameter_um=0.5, spot_channels=["AF594"], qc_overlays=False,
+                                           spot_compartments=["nucleus", "cytoplasm"]), log=lambda s: None)
+    names = [p.name for p in res.overview_plots]
+    assert any(n.endswith("_spots_by_compartment.png") for n in names)
+    metrics = set(pd.read_csv(res.analysis_dir / "replicate_summary.csv")["metric"])
+    assert {"spots_n", "cyto_spots_n", "cell_spots_n"} <= metrics
+    dist = pd.read_csv(res.analysis_dir / "spot_count_distribution.csv")
+    assert {"spots_n", "cyto_spots_n", "cell_spots_n"} <= set(dist["metric"])

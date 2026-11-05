@@ -40,6 +40,9 @@ CHANNEL_METRICS = {
     "frac_in_spots": "fraction of signal in spots",
     "mean_bgsub": "mean nuclear intensity (bg-subtracted)",
     "cyto_mean_bgsub": "mean cytoplasmic intensity (bg-subtracted)",
+    "cyto_spots_n": "spots per cell in the cytoplasm",
+    "cell_spots_n": "spots per cell (nucleus + cytoplasm)",
+    "cyto_spot_mean_area_halfmax_um2": "mean cytoplasmic spot size at half max (µm²)",
     "nc_ratio": "nuclear / cytoplasmic intensity",
 }
 COLOC_METRICS = {
@@ -58,8 +61,8 @@ COLOC_METRICS = {
     "enrich_a": "A-in-B overlap vs chance",
     "nn_ab_um": "A→B nearest spot (µm)",
 }
-SUPERPLOT_CHANNEL = ["spots_n", "spot_mean_area_halfmax_um2", "spots_area_frac", "cv", "enrichment", "nc_ratio",
-                     "cyto_mean_bgsub"]
+SUPERPLOT_CHANNEL = ["spots_n", "cyto_spots_n", "cell_spots_n", "spot_mean_area_halfmax_um2", "spots_area_frac", "cv",
+                     "enrichment", "nc_ratio", "cyto_mean_bgsub"]
 SUPERPLOT_COLOC = ["n_double", "n_a_only", "n_b_only", "pearson", "tm1", "tm2", "frac_a_overlap"]
 WILDTYPE_KEYWORDS = ("wt", "wildtype", "wild", "parental", "control", "ctrl")
 REPLICATE_COLORS = ["#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#0072B2", "#D55E00", "#F0E442", "#999999"]  # Okabe-Ito
@@ -131,9 +134,9 @@ def long_table(nuclei: pd.DataFrame, coloc: pd.DataFrame, channels: list[str]) -
         return pd.DataFrame(columns=ids + ["metric", "metric_label", "feature", "stain", "value"])
     out = pd.concat(parts, ignore_index=True)
     out["value"] = pd.to_numeric(out["value"], errors="coerce")
-    if "metric" in out:  # cell metrics exist only where cells were segmented: drop the empty rows
-        cellm = out["metric"].isin(["cell_area_um2", "cyto_area_um2", "cyto_mean_bgsub", "nc_ratio"])
-        out = out[~cellm | (out["value"].notna() & ((out["value"] != 0) | ~out["metric"].str.endswith("area_um2")))]
+    # empty values (cell metrics where no cell was segmented, nuclear spots when not quantified, ...) carry no
+    # information: drop them, and a zero cytoplasm area (no cell)
+    out = out[out["value"].notna() & ~((out["metric"] == "cyto_area_um2") & (out["value"] == 0))]
     return out
 
 
@@ -482,7 +485,7 @@ def count_bins(high: float) -> list[tuple[float, float, str]]:
     return out
 
 
-COUNT_METRICS = ["spots_n", "n_double", "n_a_only", "n_b_only"]
+COUNT_METRICS = ["spots_n", "cyto_spots_n", "cell_spots_n", "n_double", "n_a_only", "n_b_only"]
 
 
 def spot_count_distribution(long: pd.DataFrame) -> pd.DataFrame:
@@ -745,6 +748,35 @@ def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, 
                     path = out_dir / f"{name}{sfx}_spot_categories.png"
                     _category_figure(tab, t_order, ct_order, header, path)
                     written.append(path)
+
+        # spots by compartment (when the cytoplasm was quantified): nucleus | cytoplasm | whole cell, per channel
+        lab_all = long[long["antibody"] == ab]
+        comp_ch = list(dict.fromkeys(lab_all.loc[lab_all["metric"] == "cyto_spots_n", "feature"]))
+        if comp_ch:
+            comps = [("spots_n", "nucleus"), ("cyto_spots_n", "cytoplasm"), ("cell_spots_n", "whole cell")]
+            fig, axes = plt.subplots(len(comp_ch), 3, figsize=(3 * (width + 1.4), 4.0 * len(comp_ch)), squeeze=False)
+            for row_axes, feat in zip(axes, comp_ch):
+                fl = lab_all[lab_all["feature"] == feat]
+                st = ";".join(sorted(set(fl["stain"].astype(str)) - {""})) or feat
+                for i, (ax, (m, where)) in enumerate(zip(row_axes, comps)):
+                    ls = fl[fl["metric"] == m]
+                    if not len(ls):
+                        ax.axis("off")
+                        ax.text(0.5, 0.5, f"{where}: not quantified", ha="center", va="center", fontsize=10,
+                                color="0.5", transform=ax.transAxes)
+                        continue
+                    rs = rsub[(rsub["metric"] == m) & (rsub["feature"] == feat)]
+                    superplot(ax, ls, rs, f"{st} ({feat}): spots in the {where}", _p_text(omni, ab, m, feat, ct_order),
+                              t_order, ct_order, legend=i == 2)
+                    ax.set_ylabel(f"spots per cell - {where}", fontsize=9)
+                    ax.set_ylim(bottom=0)
+            fig.suptitle(f"{header} - spots per cell in the nucleus, the cytoplasm and the whole cell "
+                         "(cells with a segmented cytoplasm)", fontsize=11)
+            fig.tight_layout()
+            path = out_dir / f"{name}_spots_by_compartment.png"
+            fig.savefig(path, dpi=150, bbox_inches="tight")
+            plt.close(fig)
+            written.append(path)
 
         # average spot size per nucleus (half maximum - independent of spot brightness), one panel per channel
         m = "spot_mean_area_halfmax_um2"

@@ -27,6 +27,13 @@ Per cell (fields with a cell-boundary marker, e.g. F-actin; cell id = nucleus id
   Background is then taken outside the cells (> 1 µm away), so cytoplasmic signal is not counted as
   background.
 
+Spots per compartment (params.spot_compartments; cytoplasm needs cell boundaries):
+  <channel>_cyto_spots_n, _cyto_spots_area_um2, _cyto_spots_area_frac, _cyto_spot_mean_area_halfmax_um2,
+  _cyto_spot_mean_intensity    spots detected in the cytoplasm (per-cell threshold, as in the nucleus)
+  <channel>_cell_spots_n       nucleus + cytoplasm (when both are quantified)
+  With the nucleus not selected, the nuclear spot columns are empty (NaN). spots.csv has a 'compartment'
+  column.
+
 Nucleus QC: every segmented nucleus is analysed whatever its DAPI intensity (dapi_ratio, its mean
 DAPI / the field median, is reported but not used). Only nuclei with > qc_max_saturated_frac saturated
 pixels in a measured signal channel are flagged (qc_pass = False); they stay in the tables and are
@@ -98,33 +105,29 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
             away = away_cells
     bg = {c: (float(np.percentile(a[away], 10)) if away.any() else float(np.percentile(a, 1))) for c, a in imgs.items()}
 
-    spots, tophats = {}, {}
+    comps = set(params.spot_compartments or ["nucleus"])
+    do_nuc = "nucleus" in comps
+    # cytoplasm label image: cell id (= nucleus id) outside every nucleus
+    cyto_lab = (np.where(nuclei == 0, cells, 0).astype(np.int32)
+                if cells is not None and "cytoplasm" in comps else None)
+    spots, tophats, cspots = {}, {}, {}
     for c in spot_channels:
-        spots[c], tophats[c] = detect_spots(imgs[c], nuclei, params, px_um, (spot_floors or {}).get(c, 0.0))
+        floor = (spot_floors or {}).get(c, 0.0)
+        if do_nuc:
+            spots[c], tophats[c] = detect_spots(imgs[c], nuclei, params, px_um, floor)
+        else:
+            spots[c], tophats[c] = np.zeros(nuclei.shape, np.int32), np.zeros(nuclei.shape, np.float32)
+        if cyto_lab is not None:
+            cspots[c] = detect_spots(imgs[c], cyto_lab, params, px_um, floor)
 
-    # spot table + per-nucleus spot summaries
+    # spot tables + per-nucleus / per-cell spot summaries
     spot_summary: dict[tuple[str, int], list[dict]] = {}
+    cyto_summary: dict[tuple[str, int], list[dict]] = {}
     for c in spot_channels:
-        lab = spots[c]
-        if lab.max() == 0:
-            continue
-        parent = ndi.maximum(nuclei, lab, index=np.arange(1, lab.max() + 1))
-        th = tophats[c]
-        hm = halfmax_areas(lab, th, nuclei, int(params.spot_max_diameter_um / px_um / 2) + 2)
-        for sp in measure.regionprops(lab, intensity_image=imgs[c]):
-            nid = int(parent[sp.label - 1])
-            coords = sp.coords
-            row = {**ids, "channel": c, "stain": fi.stains.get(c, ""), "spot_id": sp.label, "nucleus_id": nid,
-                   "area_um2": sp.area * px2, "eq_diam_um": sp.equivalent_diameter_area * px_um,
-                   "area_halfmax_um2": hm.get(sp.label, sp.area) * px2,
-                   "diam_halfmax_um": 2 * math.sqrt(hm.get(sp.label, sp.area) / math.pi) * px_um,
-                   "eccentricity": sp.eccentricity, "solidity": sp.solidity,
-                   "mean_intensity": float(sp.intensity_mean), "max_intensity": float(sp.intensity_max),
-                   "integrated_intensity": float(sp.intensity_mean * sp.area),
-                   "integrated_tophat": float(th[coords[:, 0], coords[:, 1]].sum()),
-                   "centroid_y_um": sp.centroid[0] * px_um, "centroid_x_um": sp.centroid[1] * px_um}
-            res.spots.append(row)
-            spot_summary.setdefault((c, nid), []).append(row)
+        _spot_rows(res, ids, fi, c, spots[c], tophats[c], nuclei, imgs[c], params, px_um, "nucleus", spot_summary)
+        if c in cspots:
+            _spot_rows(res, ids, fi, c, *cspots[c], cyto_lab, imgs[c], params, px_um, "cytoplasm", cyto_summary)
+    cyto_px = np.bincount(cyto_lab.ravel(), minlength=int(nuclei.max()) + 1) if cyto_lab is not None else None
 
     # nuclei
     regions = measure.regionprops(nuclei)
@@ -183,6 +186,11 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
                 n[f"{c}_enrichment"] = float("nan")
             tot = float(np.clip(vb, 0, None).sum())
             n[f"{c}_frac_in_spots"] = float(np.clip(vb[in_spot], 0, None).sum() / tot) if tot > 0 else float("nan")
+            if not do_nuc:  # nuclear spots not quantified
+                for k in NUCLEAR_SPOT_KEYS:
+                    n[f"{c}_{k}"] = float("nan")
+            if cyto_lab is not None:
+                _cyto_spots(n, c, nid, cyto_summary.get((c, nid), []), cyto_px, px2, do_nuc)
         if cells is not None:
             _measure_cell(n, nid, cells, nuclei, imgs, nuclear, bg, px2, cell_slices, cell_marker)
         res.nuclei.append(n)
@@ -198,7 +206,8 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
             row["costes_p"] = (costes_pvalue(imgs[a][sl] - bg[a], imgs[b][sl] - bg[b], mask, block,
                                              params.coloc_randomizations, rng)
                                if params.coloc_randomizations > 0 else float("nan"))
-            row.update(object_coloc(np.where(mask, spots[a][sl], 0), np.where(mask, spots[b][sl], 0), mask, px_um))
+            oc = object_coloc(np.where(mask, spots[a][sl], 0), np.where(mask, spots[b][sl], 0), mask, px_um)
+            row.update(oc if do_nuc else {k: float("nan") for k in oc})  # object overlap needs nuclear spots
             res.coloc.append(row)
 
     res.field_row = {**ids, "nuclei_total": len(regions), "nuclei_qc_pass": sum(x["qc_pass"] for x in res.nuclei),
@@ -208,8 +217,57 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
     if cells is not None:
         res.field_row["cells_with_cytoplasm"] = sum(1 for x in res.nuclei if x.get("cyto_area_um2", 0) > 0)
     if qc_png is not None:
-        write_overlay(qc_png, imgs, nuclear, spot_channels, nuclei, spots, res.nuclei, cells=cells, marker=cell_marker)
+        shown = {c: np.where(spots[c] > 0, spots[c], (cspots[c][0] + spots[c].max()) * (cspots[c][0] > 0))
+                 if c in cspots else spots[c] for c in spot_channels}
+        write_overlay(qc_png, imgs, nuclear, spot_channels, nuclei, shown, res.nuclei, cells=cells, marker=cell_marker)
     return res
+
+
+NUCLEAR_SPOT_KEYS = ("spots_n", "spots_area_um2", "spots_area_frac", "spot_mean_area_um2", "spot_mean_diam_um",
+                     "spot_mean_area_halfmax_um2", "spot_mean_diam_halfmax_um", "spot_mean_ecc", "spot_mean_solidity",
+                     "spot_mean_intensity", "enrichment", "frac_in_spots")
+
+
+def _spot_rows(res, ids: dict, fi, c: str, lab: np.ndarray, th: np.ndarray, regions: np.ndarray, img: np.ndarray,
+               params: AnalysisParams, px_um: float, compartment: str, summary: dict) -> None:
+    """Add one channel's spots (in nuclei or in cytoplasm) to the spot table and the per-cell summary;
+    `regions` is the label image they were detected in (its id = nucleus id)."""
+    if lab.max() == 0:
+        return
+    px2 = px_um * px_um
+    parent = ndi.maximum(regions, lab, index=np.arange(1, lab.max() + 1))
+    hm = halfmax_areas(lab, th, regions, int(params.spot_max_diameter_um / px_um / 2) + 2)
+    for sp in measure.regionprops(lab, intensity_image=img):
+        nid = int(parent[sp.label - 1])
+        coords = sp.coords
+        row = {**ids, "channel": c, "stain": fi.stains.get(c, ""), "compartment": compartment, "spot_id": sp.label,
+               "nucleus_id": nid, "area_um2": sp.area * px2, "eq_diam_um": sp.equivalent_diameter_area * px_um,
+               "area_halfmax_um2": hm.get(sp.label, sp.area) * px2,
+               "diam_halfmax_um": 2 * math.sqrt(hm.get(sp.label, sp.area) / math.pi) * px_um,
+               "eccentricity": sp.eccentricity, "solidity": sp.solidity,
+               "mean_intensity": float(sp.intensity_mean), "max_intensity": float(sp.intensity_max),
+               "integrated_intensity": float(sp.intensity_mean * sp.area),
+               "integrated_tophat": float(th[coords[:, 0], coords[:, 1]].sum()),
+               "centroid_y_um": sp.centroid[0] * px_um, "centroid_x_um": sp.centroid[1] * px_um}
+        res.spots.append(row)
+        summary.setdefault((c, nid), []).append(row)
+
+
+def _cyto_spots(n: dict, c: str, nid: int, rows: list, cyto_px: np.ndarray, px2: float, do_nuc: bool) -> None:
+    """Cytoplasmic spot summary of one cell, and the whole-cell total when the nucleus is quantified too."""
+    area = int(cyto_px[nid]) if nid < len(cyto_px) else 0
+    if area == 0:  # no cytoplasm (no cell, or cut by the image edge)
+        for k in ("cyto_spots_n", "cyto_spots_area_um2", "cyto_spots_area_frac", "cyto_spot_mean_area_halfmax_um2",
+                  "cyto_spot_mean_intensity", "cell_spots_n"):
+            n[f"{c}_{k}"] = float("nan")
+        return
+    spot_area = sum(x["area_um2"] for x in rows)
+    n[f"{c}_cyto_spots_n"] = len(rows)
+    n[f"{c}_cyto_spots_area_um2"] = float(spot_area)
+    n[f"{c}_cyto_spots_area_frac"] = float(spot_area / (area * px2))
+    n[f"{c}_cyto_spot_mean_area_halfmax_um2"] = _nan_mean([x["area_halfmax_um2"] for x in rows])
+    n[f"{c}_cyto_spot_mean_intensity"] = _nan_mean([x["mean_intensity"] for x in rows])
+    n[f"{c}_cell_spots_n"] = (n[f"{c}_spots_n"] + len(rows)) if do_nuc else float("nan")
 
 
 def _measure_cell(n: dict, nid: int, cells: np.ndarray, nuclei: np.ndarray, imgs: dict, nuclear: str, bg: dict,

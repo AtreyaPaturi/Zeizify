@@ -167,6 +167,17 @@ class AnalyzePage(ctk.CTkFrame):
         r = _row(c, "")
         self.declump = _switch(r, "Split touching spots", d.spot_declump)
         self.declump.pack(side="left")
+        r = _row(c, "Quantify spots in", "tick both for nucleus, cytoplasm and whole-cell graphs; cytoplasm needs "
+                                         "cell boundaries (e.g. F-actin)")
+        self.in_nucleus = ctk.CTkCheckBox(r, text="Nucleus", font=T.font(12), text_color=T.TEXT, checkbox_width=18,
+                                          checkbox_height=18, corner_radius=5, fg_color=T.ACCENT,
+                                          hover_color=T.ACCENT_HOVER, border_color=T.BORDER)
+        self.in_cyto = ctk.CTkCheckBox(r, text="Cytoplasm", font=T.font(12), text_color=T.TEXT, checkbox_width=18,
+                                       checkbox_height=18, corner_radius=5, fg_color=T.ACCENT,
+                                       hover_color=T.ACCENT_HOVER, border_color=T.BORDER)
+        self.in_nucleus.select()
+        self.in_nucleus.pack(side="left", padx=(0, 14))
+        self.in_cyto.pack(side="left")
         ctk.CTkFrame(c, fg_color="transparent", height=8).pack()
 
         # coloc + run settings
@@ -306,6 +317,7 @@ class AnalyzePage(ctk.CTkFrame):
                 spot_channels=[c for c, cb in self.chan_checks.items() if cb.get()],
                 spot_min_diameter_um=float(self.smin.get()), spot_max_diameter_um=float(self.smax.get()),
                 spot_sensitivity=round(float(self.sens.get()), 1), spot_declump=bool(self.declump.get()),
+                spot_compartments=self._compartments(),
                 coloc_randomizations=int(self.rand.get()), replicate_column=REPLICATE_CHOICES[self.rep.get()],
                 workers=max(1, int(self.workers.get())), qc_overlays=bool(self.qc.get()),
                 cell_segmentation=self._marker_choice()[0], cell_marker=self._marker_choice()[1],
@@ -316,6 +328,14 @@ class AnalyzePage(ctk.CTkFrame):
         except ValueError as exc:
             self.app.toast(f"Check the settings: {exc}", kind="warning")
             return None
+
+    def _compartments(self) -> list[str]:
+        out = [name for name, cb in (("nucleus", self.in_nucleus), ("cytoplasm", self.in_cyto)) if cb.get()]
+        if not out:
+            raise ValueError("tick Nucleus and/or Cytoplasm under 'Quantify spots in'")
+        if "cytoplasm" in out and self._marker_choice()[0] == "off":
+            raise ValueError("cytoplasmic spots need cell boundaries - set Boundary stain to Auto or a channel")
+        return out
 
     def _marker_choice(self) -> tuple[str, str]:
         v = self.cell_marker.get()

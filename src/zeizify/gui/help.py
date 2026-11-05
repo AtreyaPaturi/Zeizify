@@ -161,6 +161,11 @@ HELP: dict[str, dict] = {
                 "background-subtracted nucleoplasm. Lower finds fainter spots but may split grainy nucleoplasm "
                 "into false spots; check the preview.",
                 "Split touching spots separates bodies that touch at an intensity dip.",
+                "Quantify spots in: Nucleus, Cytoplasm, or both. Cytoplasm needs cell boundaries (a cell-boundary "
+                "stain such as F-actin, see Cells and cytoplasm). With both ticked you get spots per cell in the "
+                "nucleus, the cytoplasm and the whole cell (<panel>_spots_by_compartment.png); spots.csv says "
+                "which compartment each spot is in. Diffuse cytoplasmic stains can give many faint grain 'spots' - "
+                "check the QC overlays and use a fixed threshold if needed.",
                 "Threshold per channel. Per nucleus (default) adapts to each cell's staining, but it always finds "
                 "the brightest bits of a nucleus - when a treatment dissolves the bodies (e.g. SUMO2/3 after "
                 "ML792) it calls grainy diffuse signal 'spots'. Fixed applies one brightness floor to every well: "

@@ -251,6 +251,9 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
     markers = {f.key: cell_marker_for(f.stains, f.channels, params) for f in todo}
     cell_fields = [f for f in todo if markers[f.key] and _mask_path(masks, f).exists()]
     cell_method = resolve_cell_method(params) if cell_fields else ""
+    if "cytoplasm" in (params.spot_compartments or []) and len(cell_fields) < len(todo):
+        log(f"Note: cytoplasmic spots need cell boundaries - {len(todo) - len(cell_fields)} of {len(todo)} field(s) "
+            "have no cell-boundary stain (e.g. F-actin), so only their nuclei are quantified.")
     if cell_fields:
         csig = _cells_signature(params, cell_method, sig)
         csig_file = masks / "cells_signature.json"

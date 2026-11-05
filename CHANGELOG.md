@@ -3,6 +3,24 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.13.0] - 2026-11-05
+
+### Added
+- **Spots by compartment.** *Quantify spots in* (Nucleus / Cytoplasm checkboxes on the Analyze page;
+  `--spots-in nucleus|cytoplasm|both`). Cytoplasmic spots are detected per cell in the cytoplasm, which
+  needs cell boundaries, with the same method as nuclear spots.
+  - New per-cell columns: `<ch>_cyto_spots_n`, `_cyto_spots_area_um2`, `_cyto_spots_area_frac`,
+    `_cyto_spot_mean_area_halfmax_um2`, `_cyto_spot_mean_intensity`, and `<ch>_cell_spots_n` (nucleus +
+    cytoplasm).
+  - `spots.csv` has a `compartment` column.
+  - With both compartments, `superplots/<panel>_spots_by_compartment.png` shows spots per cell in the
+    nucleus, the cytoplasm and the whole cell. The counts are also in the overview, the statistics and
+    `spot_count_distribution.csv`.
+
+### Changed
+- Empty values are no longer carried into the statistics tables. Examples: cell metrics where no cell was
+  segmented, and nuclear spots when the nucleus is not quantified.
+
 ## [1.12.0] - 2026-11-05
 
 ### Added

@@ -211,6 +211,9 @@ zeizify analyze out/ --fixed-threshold AF594        # one spot brightness floor 
 1. **Nuclei** are segmented from DAPI with Cellpose (or classical threshold + watershed). Edge-touching
    nuclei are removed. Every other nucleus is counted whatever its DAPI intensity; only nuclei with saturated
    signal are flagged and left out of statistics.
+   **Spots in the nucleus, cytoplasm or both.** With cell boundaries, spots can also be counted in the
+   cytoplasm. Tick both to get spots per cell in the nucleus, the cytoplasm and the whole cell, with a graph
+   of each (`--spots-in both`).
    **Cells.** Wells stained for F-actin (or phalloidin, CellMask, tubulin, WGA) also get whole-cell
    boundaries, from Cellpose-SAM (or a classical seeded watershed). This gives cytoplasm (cell minus
    nucleus), cytoplasmic intensities and nuclear/cytoplasmic ratios.
