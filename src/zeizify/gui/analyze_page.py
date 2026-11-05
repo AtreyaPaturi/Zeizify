@@ -231,6 +231,13 @@ class AnalyzePage(ctk.CTkFrame):
         self.high_pct = _entry(r, d.high_percentile, 60)
         self.high_pct.pack(side="left")
         ctk.CTkLabel(r, text="th percentile", font=T.font(11), text_color=T.MUTED).pack(side="left", padx=6)
+        r = _row(c, "Bright F-actin", "F-actin / phalloidin channels: above this percentile of the reference "
+                                      "condition's cell pixels, or a fixed value")
+        self.actin_pct = _entry(r, d.actin_bright_percentile, 60)
+        self.actin_pct.pack(side="left")
+        ctk.CTkLabel(r, text="th percentile  or fixed", font=T.font(11), text_color=T.MUTED).pack(side="left", padx=6)
+        self.actin_fixed = _entry(r, "", 80)
+        self.actin_fixed.pack(side="left")
         r = _row(c, "Parallel workers", "CPU processes for measurement")
         self.workers = _entry(r, d.workers)
         self.workers.pack(side="left")
@@ -369,6 +376,8 @@ class AnalyzePage(ctk.CTkFrame):
                 reference_cell_type="" if self.ref_ct.get().startswith("Auto") else self.ref_ct.get(),
                 reference_treatment="" if self.ref_t.get().startswith("Auto") else self.ref_t.get(),
                 high_percentile=float(self.high_pct.get()),
+                actin_bright_percentile=float(self.actin_pct.get()),
+                actin_bright_threshold=float(self.actin_fixed.get() or 0),
                 cell_method=CELL_METHODS[self.cell_method.get()], cell_diameter_um=float(self.cell_diam.get()),
                 exclude_border_cells=bool(self.cell_border.get()),
                 treatment_order=_csv(self.t_order.get()), cell_type_order=_csv(self.ct_order.get()),

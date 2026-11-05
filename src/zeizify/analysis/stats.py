@@ -54,6 +54,15 @@ CHANNEL_METRICS = {
     "cell_spots_n": "spots per cell (nucleus + cytoplasm)",
     "cyto_spot_mean_area_halfmax_um2": "mean cytoplasmic spot size at half max (µm²)",
     "nc_ratio": "nuclear / cytoplasmic intensity",
+    "cell_bright_pct": "% of cell area with bright F-actin",
+    "cell_p95_bgsub": "95th percentile intensity in the cell (bg-subtracted)",
+}
+# F-actin / phalloidin, one value per field (no cell boundaries needed); the dots of their SuperPlots are fields
+FIELD_METRICS = {
+    "field_bright_area_pct": "% of field area with bright F-actin (per field)",
+    "field_bright_area_per_nucleus_um2": "bright F-actin area per nucleus (µm², per field)",
+    "field_mean_bgsub": "mean intensity over the whole field (per field)",
+    "field_total_per_nucleus": "total signal of the field per nucleus (per field)",
 }
 COLOC_METRICS = {
     "pearson": "Pearson's r",
@@ -72,7 +81,9 @@ COLOC_METRICS = {
     "nn_ab_um": "A→B nearest spot (µm)",
 }
 SUPERPLOT_CHANNEL = ["mean_bgsub", "cyto_mean_bgsub", "cell_mean_bgsub", "spots_n", "cyto_spots_n", "cell_spots_n",
-                     "spot_mean_area_halfmax_um2", "spots_area_frac", "cv", "enrichment", "nc_ratio"]
+                     "spot_mean_area_halfmax_um2", "spots_area_frac", "cv", "enrichment", "nc_ratio",
+                     "field_bright_area_pct", "field_bright_area_per_nucleus_um2", "field_mean_bgsub",
+                     "field_total_per_nucleus", "cell_bright_pct", "cell_p95_bgsub"]
 # "high" cells: intensity column -> (metric, compartment); per cell 0 / 100, per replicate the % of cells
 HIGH_SOURCES = {"mean_bgsub": ("high_nucleus", "nucleus"), "cyto_mean_bgsub": ("high_cytoplasm", "cytoplasm"),
                 "cell_mean_bgsub": ("high_cell", "whole cell")}
@@ -80,7 +91,8 @@ FRACTION_METRICS = {m for m, _ in HIGH_SOURCES.values()}
 # readouts of the overall signal; left out of the statistics when "signal" is not quantified
 SIGNAL_METRICS = {"mean_bgsub", "cyto_mean_bgsub", "cell_mean_bgsub", "nc_ratio", "integrated_bgsub",
                   "cyto_integrated_bgsub", "cell_integrated_bgsub", "spots_integrated_bgsub",
-                  "cyto_spots_integrated_bgsub", "diffuse_mean_bgsub", "cv", *FRACTION_METRICS}
+                  "cyto_spots_integrated_bgsub", "diffuse_mean_bgsub", "cv", *FRACTION_METRICS,
+                  "cell_bright_pct", "cell_p95_bgsub", *FIELD_METRICS}
 SUPERPLOT_COLOC = ["n_double", "n_a_only", "n_b_only", "pearson", "tm1", "tm2", "frac_a_overlap"]
 WILDTYPE_KEYWORDS = ("wt", "wildtype", "wild", "parental", "control", "ctrl")
 REPLICATE_COLORS = ["#E69F00", "#56B4E9", "#009E73", "#CC79A7", "#0072B2", "#D55E00", "#F0E442", "#999999"]  # Okabe-Ito
@@ -214,6 +226,28 @@ def long_table(nuclei: pd.DataFrame, coloc: pd.DataFrame, channels: list[str], q
     # information: drop them, and a zero cytoplasm area (no cell)
     out = out[out["value"].notna() & ~((out["metric"] == "cyto_area_um2") & (out["value"] == 0))]
     return out
+
+
+def field_long_table(fields: pd.DataFrame, channels: list[str]) -> pd.DataFrame:
+    """Per-field F-actin readouts in the long format (one row per field x metric; 'value' per field)."""
+    ids = ["antibody", "cell_type", "treatment", "replicate", "well"]
+    parts = []
+    f = fields.copy()
+    for c in ("cell_type", "treatment", "antibody", "replicate"):
+        if c in f:
+            f[c] = f[c].fillna("")
+    for c in channels:
+        for m, label in FIELD_METRICS.items():
+            col = f"{c}_{m}"
+            if col in f:
+                sub = f[f[col].notna()]
+                stain = sub.get(f"{c}_stain", pd.Series("", index=sub.index)).fillna("")
+                parts.append(sub[ids].assign(metric=m, metric_label=label, feature=c, stain=stain.values,
+                                             value=pd.to_numeric(sub[col], errors="coerce")))
+    if not parts:
+        return pd.DataFrame(columns=ids + ["metric", "metric_label", "feature", "stain", "value"])
+    out = pd.concat(parts, ignore_index=True)
+    return out[out["value"].notna()]
 
 
 GROUP = ["antibody", "cell_type", "metric", "metric_label", "feature"]
@@ -503,14 +537,14 @@ def _size(n: float, n_max: float) -> float:
     return max(18.0, 380.0 * n / max(n_max, 1))
 
 
-def _legend_handles(levels: list, n_max: float) -> list:
+def _legend_handles(levels: list, n_max: float, unit: str = "nuclei") -> list:
     from matplotlib.lines import Line2D
     from matplotlib.ticker import MaxNLocator
 
     hs = [Line2D([], [], ls="", marker="o", markersize=7, color=REPLICATE_COLORS[i % len(REPLICATE_COLORS)],
                  mec="black", mew=0.6, label=str(lv)) for i, lv in enumerate(levels)]
     ns = [v for v in MaxNLocator(3, integer=True).tick_values(0, n_max) if 0 < v <= n_max * 1.05] or [n_max]
-    hs.append(Line2D([], [], ls="", label="$n$ (nuclei)"))
+    hs.append(Line2D([], [], ls="", label=f"$n$ ({unit})"))
     hs += [Line2D([], [], ls="", marker="o", markersize=math.sqrt(_size(v, n_max)), mfc="white", mec="black",
                   mew=0.8, label=f"{int(v)}") for v in ns]
     return hs
@@ -564,7 +598,8 @@ def superplot(ax, long_sub: pd.DataFrame, rep_sub: pd.DataFrame, title: str, p_t
                        color=color.get(keys.get((t, ct, str(r["replicate"])), ""), "0.5"), edgecolor="black", lw=0.8)
     ax.set_title(title + (f"\n{p_text}" if p_text else ""), fontsize=9)
     _box(ax)
-    handles = _legend_handles(levels, n_max)
+    per_field = len(long_sub) and long_sub["metric"].isin(FIELD_METRICS).all()
+    handles = _legend_handles(levels, n_max, "fields" if per_field else "nuclei")
     if legend:
         add_legend(ax, handles, loc="upper left", bbox_to_anchor=(1.01, 1.0))
     return handles
@@ -770,8 +805,32 @@ def _signal_rows(lab: pd.DataFrame) -> list:
     return out
 
 
+ACTIN_GROUPS = [
+    ("whole field (dots: fields)", [("field_bright_area_pct", "% area with bright F-actin"),
+                                    ("field_bright_area_per_nucleus_um2", "bright area per nucleus"),
+                                    ("field_mean_bgsub", "mean intensity"),
+                                    ("field_total_per_nucleus", "total signal per nucleus")]),
+    ("per cell (dots: cells)", [("cell_bright_pct", "% of cell area bright"),
+                                ("cell_p95_bgsub", "95th percentile intensity"),
+                                ("cyto_mean_bgsub", "mean cytoplasm"), ("cell_mean_bgsub", "mean whole cell")]),
+]
+
+
+def _actin_rows(lab: pd.DataFrame) -> list:
+    """(channel, group title, [(metric, label), ...]) for every F-actin channel (one with field readouts)."""
+    have = set(zip(lab["feature"], lab["metric"]))
+    out = []
+    for f in dict.fromkeys(lab.loc[lab["metric"] == "field_bright_area_pct", "feature"]):
+        for title, items in ACTIN_GROUPS:
+            present = [(m, w) for m, w in items if (f, m) in have]
+            if present:
+                out.append((f, title, present))
+    return out
+
+
 def _signal_figure(lab: pd.DataFrame, rsub: pd.DataFrame, omni: pd.DataFrame, ab, rows: list, t_order: list,
-                   ct_order: list, header: str, width: float, path) -> None:
+                   ct_order: list, header: str, width: float, path,
+                   suptitle: str = "overall signal (background-subtracted; totals include the speckle signal)") -> None:
     """SuperPlots of the overall signal: one row per channel and group (means, totals, speckle / diffuse)."""
     import matplotlib.pyplot as plt
 
@@ -791,7 +850,7 @@ def _signal_figure(lab: pd.DataFrame, rsub: pd.DataFrame, omni: pd.DataFrame, ab
             ax.set_ylabel(ls["metric_label"].iloc[0] if len(ls) else m, fontsize=8)
             if m != "nc_ratio":
                 ax.set_ylim(bottom=0)
-    fig.suptitle(f"{header} - overall signal (background-subtracted; totals include the speckle signal)", fontsize=11)
+    fig.suptitle(f"{header} - {suptitle}", fontsize=11)
     fig.tight_layout()
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -981,6 +1040,15 @@ def write_superplots(long: pd.DataFrame, rep: pd.DataFrame, omni: pd.DataFrame, 
         if sig_rows:
             path = out_dir / f"{name}_signal.png"
             _signal_figure(lab_all, rsub, omni, ab, sig_rows, t_order, ct_order, header, width, path)
+            written.append(path)
+
+        # F-actin / phalloidin: whole-field and bright-structure readouts (independent of the cell outlines)
+        actin_rows = _actin_rows(lab_all)
+        if actin_rows:
+            path = out_dir / f"{name}_actin.png"
+            _signal_figure(lab_all, rsub, omni, ab, actin_rows, t_order, ct_order, header, width, path,
+                           "F-actin: whole field (no cell outlines needed) and bright structures per cell; "
+                           "'bright' = above the cut-off in actin_thresholds.csv")
             written.append(path)
 
         # % high cells per channel and compartment, vs the reference condition's cut-off

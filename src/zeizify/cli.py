@@ -115,6 +115,10 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--no-declump", action="store_true")
     a.add_argument("--quantify", default="speckles,signal", metavar="speckles,signal",
                    help="speckles (spot detection), signal (overall intensity, speckles included), or both (default)")
+    a.add_argument("--actin-percentile", type=float, default=99.0, metavar="P",
+                   help="F-actin / phalloidin: 'bright' = above this percentile of the reference cells' pixels")
+    a.add_argument("--actin-threshold", type=float, default=0.0, metavar="V",
+                   help="F-actin / phalloidin: fixed bright cut-off (background-subtracted; 0 = percentile)")
     a.add_argument("--channel-quantify", action="append", default=[], metavar="CHANNEL=speckles|signal|both",
                    help="what to quantify in one channel (repeatable), e.g. AF488=signal AF594=both; others use --quantify")
     a.add_argument("--spots-in", default="nucleus", metavar="nucleus,cytoplasm",
@@ -279,6 +283,7 @@ def _analyze(args) -> int:
         spot_min_diameter_um=args.spot_diameter[0], spot_max_diameter_um=args.spot_diameter[1],
         spot_sensitivity=args.sensitivity, spot_declump=not args.no_declump, spot_compartments=_compartments(args),
         quantify=_quantify(args), channel_quantify=_channel_quantify(args),
+        actin_bright_percentile=args.actin_percentile, actin_bright_threshold=args.actin_threshold,
         reference_cell_type=args.reference.partition(",")[0].strip(),
         reference_treatment=args.reference.partition(",")[2].strip(), high_percentile=args.high_percentile,
         coloc_randomizations=args.randomizations, cell_segmentation=args.cells, cell_marker=args.cell_marker,

@@ -67,6 +67,10 @@ class AnalysisParams:
     # reference condition every other condition is compared with, and that defines "high" cells
     reference_cell_type: str = ""  # "" = the wild type (first cell type)
     reference_treatment: str = ""  # "" = the control (first treatment)
+    # F-actin / phalloidin: "bright" = above this percentile of the reference condition's cell pixels, or a
+    # fixed background-subtracted value (> 0)
+    actin_bright_percentile: float = 99.0
+    actin_bright_threshold: float = 0.0
     high_percentile: float = 95.0  # a cell is "high" above this percentile of the reference condition's cells
     seed: int = 0
 

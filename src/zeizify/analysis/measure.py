@@ -37,6 +37,10 @@ Overall signal ("signal"), background-subtracted, speckles included:
   In a channel without "speckles" no spots are detected and its spot columns are empty (NaN); spot overlap
   between two channels needs speckles in both.
 
+F-actin / phalloidin channels (see actin.py): per cell <channel>_cell_bright_pct, _cell_p95_bgsub; per field
+  (fields.csv) <channel>_field_mean_bgsub, _field_total_per_nucleus, _field_bright_area_pct,
+  _field_bright_area_per_nucleus_um2 - readouts that do not depend on the cell boundaries.
+
 Spots per compartment (params.spot_compartments; cytoplasm needs cell boundaries):
   <channel>_cyto_spots_n, _cyto_spots_area_um2, _cyto_spots_area_frac, _cyto_spot_mean_area_halfmax_um2,
   _cyto_spot_mean_intensity    spots detected in the cytoplasm (per-cell threshold, as in the nucleus)
@@ -65,6 +69,7 @@ from skimage import measure, morphology
 from .coloc import costes_pvalue, object_coloc, pixel_coloc
 from .io import FieldImages
 from .params import AnalysisParams
+from .actin import cell_readouts, field_readouts
 from .segment import detect_spots, halfmax_areas
 
 
@@ -88,10 +93,24 @@ def _nan_mean(x) -> float:
     return float(np.nanmean(x)) if x.size and np.isfinite(x).any() else float("nan")
 
 
+def field_background(imgs: dict, nuclei: np.ndarray, cells: "np.ndarray | None", px_um: float) -> dict[str, float]:
+    """Per channel: 10th percentile of the pixels > 1 µm away from any nucleus - or from any cell, when cells
+    were segmented and leave enough cell-free area."""
+    disk = morphology.disk(max(1, int(1.0 / px_um)), decomposition="sequence")
+    away = ~morphology.dilation(nuclei > 0, disk)
+    if cells is not None:
+        away_cells = ~morphology.dilation((cells > 0) | (nuclei > 0), disk)
+        if away_cells.mean() > 0.01:  # enough cell-free area (not a confluent field)
+            away = away_cells
+    return {c: (float(np.percentile(a[away], 10)) if away.any() else float(np.percentile(a, 1)))
+            for c, a in imgs.items()}
+
+
 def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channels: list[str],
                   params: AnalysisParams, px_um: float, bit_ceiling: "int | None" = None,
                   qc_png: "Path | None" = None, spot_floors: "dict[str, float] | None" = None,
-                  cells: "np.ndarray | None" = None, cell_marker: "str | None" = None) -> FieldResult:
+                  cells: "np.ndarray | None" = None, cell_marker: "str | None" = None,
+                  actin_thresholds: "dict[str, float] | None" = None) -> FieldResult:
     res = FieldResult(fi.key)
     ids = _ids(fi)
     load = [nuclear, *spot_channels] + ([cell_marker] if cells is not None and cell_marker else [])
@@ -107,13 +126,9 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
     px2 = px_um * px_um
 
     # background from pixels well away from any nucleus - or from any cell, when cells were segmented
-    disk = morphology.disk(max(1, int(1.0 / px_um)), decomposition="sequence")
-    away = ~morphology.dilation(nuclei > 0, disk)
-    if cells is not None:
-        away_cells = ~morphology.dilation((cells > 0) | (nuclei > 0), disk)
-        if away_cells.mean() > 0.01:  # enough cell-free area (not a confluent field)
-            away = away_cells
-    bg = {c: (float(np.percentile(a[away], 10)) if away.any() else float(np.percentile(a, 1))) for c, a in imgs.items()}
+    bg = field_background(imgs, nuclei, cells, px_um)
+    # F-actin / phalloidin channels stained in this field -> their bright cut-off
+    actin = {c: t for c, t in (actin_thresholds or {}).items() if c in spot_channels}
 
     spot_ch = {c for c in spot_channels if "speckles" in params.quantify_for(c)}  # channels with spot detection
     comps = set(params.spot_compartments or ["nucleus"]) if spot_ch else set()
@@ -207,7 +222,7 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
             if cyto_lab is not None and c in spot_ch:
                 _cyto_spots(n, c, nid, cyto_summary.get((c, nid), []), cyto_px, px2, do_nuc, bg[c])
         if cells is not None:
-            _measure_cell(n, nid, cells, nuclei, imgs, nuclear, bg, px2, cell_slices, cell_marker)
+            _measure_cell(n, nid, cells, nuclei, imgs, nuclear, bg, px2, cell_slices, cell_marker, actin)
         res.nuclei.append(n)
 
         for a, b in pairs:
@@ -229,6 +244,9 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
     res.field_row = {**ids, "nuclei_total": len(regions), "nuclei_qc_pass": sum(x["qc_pass"] for x in res.nuclei),
                      **{f"{c}_bg": bg[c] for c in imgs},
                      **{f"{c}_saturated_field": fi.saturated.get(c, False) for c in imgs}}
+    for c, t in actin.items():
+        res.field_row[f"{c}_stain"] = fi.stains.get(c, "")
+        res.field_row.update(field_readouts(c, imgs[c], bg[c], t, len(regions), px2))
 
     if cells is not None:
         res.field_row["cells_with_cytoplasm"] = sum(1 for x in res.nuclei if x.get("cyto_area_um2", 0) > 0)
@@ -290,12 +308,14 @@ def _cyto_spots(n: dict, c: str, nid: int, rows: list, cyto_px: np.ndarray, px2:
 
 
 def _measure_cell(n: dict, nid: int, cells: np.ndarray, nuclei: np.ndarray, imgs: dict, nuclear: str, bg: dict,
-                  px2: float, cell_slices, marker: "str | None") -> None:
+                  px2: float, cell_slices, marker: "str | None", actin: "dict[str, float] | None" = None) -> None:
     """Cell / cytoplasm measurements of one nucleus's cell (in place)."""
     sl = cell_slices[nid - 1] if nid - 1 < len(cell_slices) else None
     n["cell_marker"] = marker or ""
     if sl is None:
         n["cell_area_um2"], n["cyto_area_um2"] = float("nan"), 0.0
+        for c, t in (actin or {}).items():
+            n.update(cell_readouts(c, np.zeros(0), t))
         return
     cell = cells[sl] == nid
     cyto = cell & (nuclei[sl] == 0)
@@ -317,6 +337,8 @@ def _measure_cell(n: dict, nid: int, cells: np.ndarray, nuclei: np.ndarray, imgs
         n[f"{c}_cell_mean_bgsub"] = float(a[cell].mean()) - bg[c] if has else float("nan")
         n[f"{c}_cell_integrated_bgsub"] = float((a[cell] - bg[c]).sum()) if has else float("nan")
         n[f"{c}_nc_ratio"] = nmb / cmb if has and cmb > 0 else float("nan")
+        if actin and c in actin:
+            n.update(cell_readouts(c, a[cell] - bg[c] if has else np.zeros(0), actin[c]))
 
 
 def _pair_type(sa: str, sb: str) -> str:

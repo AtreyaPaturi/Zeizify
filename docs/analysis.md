@@ -186,6 +186,22 @@ overall signal as SuperPlots, one row per channel:
 - totals (nucleus, cytoplasm, whole cell);
 - with speckles, the speckle / diffuse split.
 
+## 3c. F-actin / phalloidin
+
+Whenever an analysed channel is stained for F-actin or phalloidin (with the overall signal quantified),
+readouts that do not depend on the cell outlines are added. F-actin between cells (stress fibres,
+junctions, aggregates, protrusions) is often outside every segmented cell, and a mean intensity dilutes a
+few very bright structures.
+- **Per field** (`fields.csv`; SuperPlots with one dot per field): `<ch>_field_bright_area_pct` (% of the
+  field above the bright cut-off), `_field_bright_area_per_nucleus_um2`, `_field_mean_bgsub` (whole field),
+  `_field_total_per_nucleus`.
+- **Per cell** (`nuclei.csv`): `<ch>_cell_bright_pct` (% of the cell area above the cut-off) and
+  `_cell_p95_bgsub` (95th-percentile intensity).
+- **Bright cut-off**: the `actin_bright_percentile` (99th) of the background-subtracted pixels inside the
+  reference condition's cells of the same staining panel (`--actin-percentile`), or a fixed value
+  (`--actin-threshold`); written to `actin_thresholds.csv`. Saturated pixels count as bright.
+- Figure: `superplots/<panel>_actin.png`.
+
 ## 4. Colocalization (per nucleus, every pair of analysed channels)
 
 **Pixel-based**, on background-subtracted intensities (clipped at 0) inside the nucleus. Definitions match

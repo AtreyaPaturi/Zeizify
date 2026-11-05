@@ -123,10 +123,68 @@ def resolve_spot_floors(params: AnalysisParams, channels: list[str], candidates:
     return out
 
 
+def _actin_hist_task(fi: FieldImages, mask: Path, cells_path: "Path | None", channel: str, px_um: float,
+                     ceiling: float) -> np.ndarray:
+    import warnings
+
+    warnings.filterwarnings("ignore")
+    from .actin import reference_histogram
+
+    return reference_histogram(fi, mask, cells_path, channel, px_um, ceiling)
+
+
+def resolve_actin_thresholds(ds: Dataset, ready: list, channels: list[str], params: AnalysisParams, masks: Path,
+                             markers: dict, log: Log) -> tuple[dict, pd.DataFrame]:
+    """Bright F-actin cut-off per (staining panel, channel): the `actin_bright_percentile` of the reference
+    condition's cell pixels (background-subtracted), or the fixed `actin_bright_threshold`. Returns
+    ({field key: {channel: cut-off}}, table for actin_thresholds.csv)."""
+    from .actin import is_actin, threshold_from_histogram
+    from .stats import default_orders, resolve_reference
+
+    meta = pd.DataFrame([{"cell_type": f.cell_type or "", "treatment": f.treatment or "", "well": f.well}
+                         for f in ds.fields])
+    ref_ct, ref_t = resolve_reference(default_orders(meta, params.treatment_order, params.cell_type_order),
+                                      params.reference_cell_type, params.reference_treatment)
+    ceiling = float(ds.bit_ceiling or 65535)
+    per_field: dict[str, dict] = {}
+    rows = []
+    for c in channels:
+        stained = [f for f in ready if is_actin(f.stains.get(c, ""))]
+        for ab in dict.fromkeys(f.antibody for f in stained):
+            panel = [f for f in stained if f.antibody == ab]
+            ref = [f for f in panel if (f.cell_type or "") == ref_ct and (f.treatment or "") == ref_t]
+            note = ""
+            if params.actin_bright_threshold and params.actin_bright_threshold > 0:
+                thr, mode = float(params.actin_bright_threshold), "fixed"
+            else:
+                if not ref:
+                    ref, note = panel, "reference condition not in this panel - all its fields pooled"
+                hists = []
+                with ProcessPoolExecutor(max_workers=params.workers) as ex:
+                    futs = [ex.submit(_actin_hist_task, f, _mask_path(masks, f),
+                                      _cells_path(masks, f) if markers.get(f.key) else None, c, ds.px_um, ceiling)
+                            for f in ref]
+                    for fut in futs:
+                        try:
+                            hists.append(fut.result())
+                        except Exception:  # noqa: BLE001 - a bad field is reported by the measure step
+                            pass
+                thr = (threshold_from_histogram(np.sum(hists, axis=0), ceiling, params.actin_bright_percentile)
+                       if hists else float("nan"))
+                mode = f"P{params.actin_bright_percentile:g} of {ref_ct} · {ref_t} cell pixels"
+            for f in panel:
+                per_field.setdefault(f.key, {})[c] = thr
+            rows.append({"antibody": ab, "channel": c, "stain": panel[0].stains.get(c, ""), "threshold": thr,
+                         "mode": mode, "reference_fields": len(ref), "note": note})
+            log(f"  {c} ({panel[0].stains.get(c, '')}, {ab}): bright F-actin above {thr:.0f} ({mode})"
+                + (f" - {note}" if note else ""))
+    return per_field, pd.DataFrame(rows)
+
+
 def _measure_task(fi: FieldImages, mask: Path, nuclear: str, spot_channels: list[str], params: AnalysisParams,
                   px_um: float, bits: "int | None", qc_png: "Path | None",
                   floors: "dict[str, float] | None" = None, cells_path: "Path | None" = None,
-                  marker: "str | None" = None) -> FieldResult:
+                  marker: "str | None" = None, actin: "dict[str, float] | None" = None) -> FieldResult:
     import warnings
 
     warnings.filterwarnings("ignore")
@@ -134,7 +192,7 @@ def _measure_task(fi: FieldImages, mask: Path, nuclear: str, spot_channels: list
         nuclei = tifffile.imread(mask).astype(np.int32)
         cells = tifffile.imread(cells_path).astype(np.int32) if cells_path is not None and cells_path.exists() else None
         return measure_field(fi, nuclei, nuclear, spot_channels, params, px_um, bits, qc_png, floors, cells,
-                             marker if cells is not None else None)
+                             marker if cells is not None else None, actin)
     except Exception as exc:  # noqa: BLE001 - one bad field never aborts the run
         return FieldResult(fi.key, error=f"{exc}\n{traceback.format_exc(limit=3)}")
 
@@ -339,10 +397,21 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
             log(f"  WARNING {c}: spot brightness shows no clear dim/bright split - a fixed floor may remove real "
                 "spots; check qc/spot_brightness.png or use the per-nucleus threshold.")
     floors = {c: d["floor"] for c, d in spot_floors.items()}
+    # F-actin / phalloidin: readouts independent of the cell boundaries, with a bright cut-off from the reference
+    from .actin import actin_channels
+
+    actin_ch = actin_channels(ready, spot_channels, params)
+    actin_cut, actin_info = {}, pd.DataFrame()
+    if actin_ch:
+        log(f"F-actin / phalloidin in {', '.join(actin_ch)}: whole-field and bright-structure readouts.")
+        prog("measure", 0, len(ready), "F-actin bright cut-off")
+        actin_cut, actin_info = resolve_actin_thresholds(ds, ready, actin_ch, params, masks, markers, log)
+        actin_info.to_csv(adir / "actin_thresholds.csv", index=False)
     with ProcessPoolExecutor(max_workers=params.workers) as ex:
         futs = {ex.submit(_measure_task, f, _mask_path(masks, f), nuclear, spot_channels, params, ds.px_um,
                           ds.bit_ceiling, (qc_dir / f"{f.key}_qc.png") if params.qc_overlays else None,
-                          floors, _cells_path(masks, f) if markers.get(f.key) else None, markers.get(f.key)): f
+                          floors, _cells_path(masks, f) if markers.get(f.key) else None, markers.get(f.key),
+                          actin_cut.get(f.key)): f
                 for f in ready}
         for i, fut in enumerate(as_completed(futs), start=1):
             f = futs[fut]
@@ -368,8 +437,8 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
     t_stage = time.monotonic()
 
     # ---- stage 3: tables + statistics ----
-    from .stats import (add_high_flags, condition_summary, default_orders, long_table, replicate_summary,
-                        resolve_reference, run_tests, write_superplots)
+    from .stats import (add_high_flags, condition_summary, default_orders, field_long_table, long_table,
+                        replicate_summary, resolve_reference, run_tests, write_superplots)
 
     prog("stats", 0, 1, "tables")
     nuclei = pd.DataFrame([n for r in results for n in r.nuclei])
@@ -407,6 +476,8 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
             if c in df:
                 df[c] = df[c].fillna("")
     long = long_table(nuclei, coloc, spot_channels, params.quantify_for) if len(nuclei) else pd.DataFrame()
+    if len(long) and actin_ch and len(fields_df):  # per-field F-actin readouts (one value per field)
+        long = pd.concat([long, field_long_table(fields_df, actin_ch)], ignore_index=True)
     rep = replicate_summary(long) if len(long) else pd.DataFrame()
     cond = condition_summary(rep) if len(rep) else pd.DataFrame()
     orders = default_orders(long, params.treatment_order, params.cell_type_order) if len(long) else {}
@@ -439,6 +510,7 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
         "reference_condition": {"cell_type": reference[0], "treatment": reference[1],
                                 "high_percentile": params.high_percentile},
         "cell_markers": sorted({markers[f.key] for f in cell_fields}),
+        "actin_thresholds": actin_info.to_dict("records") if len(actin_info) else [],
         "fields_analysed": len(results), "errors": [{"field": k, "error": e} for k, e in errors],
         "nuclei_total": int(len(nuclei)), "nuclei_qc_pass": int(nuclei["qc_pass"].sum()) if len(nuclei) else 0,
         "replicate_unit": replicate_unit(params, ds),
@@ -464,9 +536,20 @@ def preview_field(out_dir: "str | Path", key: str, params: AnalysisParams, png: 
     channels = params.spot_channels or ds.signal_channels
     floors = {c: float(v) for c, v in params.spot_fixed_threshold.items() if v and v > 0}
     auto = [c for c, v in params.spot_fixed_threshold.items() if not (v and v > 0)]
+    man = Path(out_dir) / "analysis" / "analysis_manifest.json"
+    last_run = json.loads(man.read_text(encoding="utf-8")) if man.exists() else {}
     if auto:  # an automatic floor needs every well: reuse the last full run's value
-        man = Path(out_dir) / "analysis" / "analysis_manifest.json"
-        last = json.loads(man.read_text(encoding="utf-8")).get("spot_thresholds", {}) if man.exists() else {}
+        last = last_run.get("spot_thresholds", {})
         floors.update({c: last[c]["floor"] for c in auto if c in last})
+    from .actin import actin_channels
+
+    actin = {}
+    for c in actin_channels([fi], channels, params):  # the cut-off needs the reference wells: reuse the last run's
+        if params.actin_bright_threshold and params.actin_bright_threshold > 0:
+            actin[c] = float(params.actin_bright_threshold)
+        else:
+            hit = [x["threshold"] for x in last_run.get("actin_thresholds", [])
+                   if x.get("channel") == c and x.get("antibody") == fi.antibody]
+            actin[c] = float(hit[0]) if hit else float("nan")
     return measure_field(fi, nuclei, nuclear, channels, params, ds.px_um, ds.bit_ceiling, png, floors, cells,
-                         marker), method
+                         marker, actin), method

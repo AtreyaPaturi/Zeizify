@@ -212,6 +212,8 @@ zeizify analyze out/ --reference "WT,MOCK" --high-percentile 95   # compare ever
 1. **Nuclei** are segmented from DAPI with Cellpose (or classical threshold + watershed). Edge-touching
    nuclei are removed. Every other nucleus is counted whatever its DAPI intensity; only nuclei with saturated
    signal are flagged and left out of statistics.
+   **F-actin / phalloidin**: whole-field and bright-structure readouts that do not depend on the cell
+   outlines (`<panel>_actin.png`).
    **Speckles, overall signal, or both, per fluorophore** (`--channel-quantify AF488=signal`; `--quantify` for
    all). *Overall signal* measures the mean and total
    intensity of the nucleus, cytoplasm and whole cell, speckles included, without needing spots. With both,

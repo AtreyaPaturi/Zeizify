@@ -3,6 +3,19 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.17.0] - 2026-11-05
+
+### Added
+- **F-actin / phalloidin readouts**, added automatically for every channel stained for F-actin or
+  phalloidin. They do not depend on the cell outlines, so F-actin between cells (fibres, junctions,
+  aggregates) and a few very bright structures are no longer missed or diluted.
+  - Per field: % of the field with bright F-actin, bright area per nucleus, whole-field mean, total signal per
+    nucleus (`fields.csv`; SuperPlots with fields as dots).
+  - Per cell: % of the cell area that is bright, 95th-percentile intensity.
+  - Bright = above the 99th percentile of the reference condition's cell pixels (`--actin-percentile`), or a
+    fixed value (`--actin-threshold`); *Bright F-actin* on the Analyze page; `actin_thresholds.csv`.
+  - Figure `superplots/<panel>_actin.png`.
+
 ## [1.16.1] - 2026-11-05
 
 ### Changed

@@ -226,3 +226,57 @@ def test_compartment_graphs_written(tmp_path):
     assert {"spots_n", "cyto_spots_n", "cell_spots_n"} <= metrics
     dist = pd.read_csv(res.analysis_dir / "spot_count_distribution.csv")
     assert {"spots_n", "cyto_spots_n", "cell_spots_n"} <= set(dist["metric"])
+
+
+def test_actin_helpers():
+    from zeizify.analysis.actin import (HIST_BINS, cell_readouts, field_readouts, is_actin,
+                                        threshold_from_histogram)
+
+    assert is_actin("F-Actin") and is_actin("Phalloidin-647") and is_actin("actin")
+    assert not is_actin("alpha-actinin") and not is_actin("Cyclin A") and not is_actin("")
+    v = np.arange(1000, dtype=float)
+    hist = np.histogram(v, bins=np.linspace(0, 1000, HIST_BINS + 1))[0]
+    assert abs(threshold_from_histogram(hist, 1000, 99) - 990) < 2
+    img = np.full((10, 10), 100, np.uint16)
+    img[:2] = 1100  # 20 % of the field bright
+    f = field_readouts("A", img, 100.0, 500.0, 4, 0.25)
+    assert f["A_field_bright_area_pct"] == 20.0 and f["A_field_bright_area_per_nucleus_um2"] == 20 * 0.25 / 4
+    assert f["A_field_mean_bgsub"] == 200.0 and f["A_field_total_per_nucleus"] == 20000 / 4
+    c = cell_readouts("A", np.array([0, 0, 0, 1000.0]), 500.0)
+    assert c["A_cell_bright_pct"] == 25.0
+
+
+def test_actin_readouts_catch_signal_outside_cells(tmp_path):
+    """KO: bright F-actin clumps between the cells - missed by the cell means, caught by the field readouts."""
+    from zeizify.analysis.run import run_analysis
+
+    out = tmp_path / "o"
+    write_zeizify_output(out, [{"well": w, "field": "P1", "treatment": "Mock", "seed": i, "shared": 0.5, "cell_type": ct}
+                               for i, (w, ct) in enumerate((("A1", "WT"), ("A2", "KO")))])
+    rep = out / "intensity_report.csv"
+    rows = list(csv.DictReader(open(rep, encoding="utf-8")))
+    bodies = _cell_bodies()
+    for r in rows:
+        if r["Channel"] == "AF488":
+            r["Stain"] = "F-Actin"
+            img = _marker(bodies).astype(np.float64)
+            if r["CellType"] == "KO":
+                img[(bodies == 0) & (np.indices(SHAPE).sum(0) % 7 < 3)] = 6000  # bright between the cells
+            tifffile.imwrite(r["Path"], img.astype(np.uint16))
+    with open(rep, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0]))
+        w.writeheader()
+        w.writerows(rows)
+    res = run_analysis(out, AnalysisParams(nucleus_method="classical", cell_method="classical", workers=1,
+                                           spot_min_diameter_um=0.5, qc_overlays=False,
+                                           channel_quantify={"AF488": ["signal"]}), log=lambda s: None)
+    thr = pd.read_csv(res.analysis_dir / "actin_thresholds.csv")
+    assert thr["channel"].tolist() == ["AF488"] and np.isfinite(thr["threshold"]).all()
+    fields = pd.read_csv(res.analysis_dir / "fields.csv").set_index("cell_type")
+    assert fields.loc["KO", "AF488_field_bright_area_pct"] > 10 * max(fields.loc["WT", "AF488_field_bright_area_pct"], 0.1)
+    n = pd.read_csv(res.analysis_dir / "nuclei.csv")
+    assert {"AF488_cell_bright_pct", "AF488_cell_p95_bgsub"} <= set(n.columns)
+    assert "AF594_cell_bright_pct" not in n  # not an F-actin channel
+    metrics = set(pd.read_csv(res.analysis_dir / "replicate_summary.csv")["metric"])
+    assert {"field_bright_area_pct", "field_mean_bgsub", "cell_bright_pct"} <= metrics
+    assert any(p.name.endswith("_actin.png") for p in res.overview_plots)

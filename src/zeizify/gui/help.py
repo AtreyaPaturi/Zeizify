@@ -155,6 +155,18 @@ HELP: dict[str, dict] = {
                 "<channel>_nc_ratio). Cell outlines are cyan in the Preview and QC overlays. Cell masks are "
                 "cached like nuclear masks.",
             ]),
+            ("F-actin / phalloidin", [
+                "Whenever a channel is stained for F-actin or phalloidin (and Overall signal is ticked), Zeizify adds "
+                "readouts that do not depend on the cell outlines - F-actin between cells (fibres, junctions, "
+                "aggregates) is often outside every segmented cell, and a mean dilutes a few bright structures.",
+                "Per field (dots = fields): % of the field with bright F-actin, bright area per nucleus, mean "
+                "intensity over the whole field, total signal per nucleus.",
+                "Per cell: % of the cell area that is bright, and the cell's 95th-percentile intensity.",
+                "Bright = above the 99th percentile of the reference condition's cell pixels (e.g. WT · MOCK: by "
+                "definition ~1 % bright there), or a fixed value - 'Bright F-actin' under Colocalization & "
+                "statistics. Saturated pixels count as bright. Cut-off: actin_thresholds.csv.",
+                "Graph: superplots/<panel>_actin.png.",
+            ]),
             ("Speckles or overall signal", [
                 "Chosen per fluorophore: each channel has its own Speckles and Overall signal boxes (e.g. F-actin: "
                 "Overall signal only; PML: both). A cell-boundary stain starts with Overall signal only. Spot "
