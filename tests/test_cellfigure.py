@@ -161,11 +161,11 @@ def test_nuclear_check_only_for_nuclear_stains():
     assert cf._nuclear_ok({}, {})
 
 
-def test_closest_cells_offered_when_nothing_fits(analysed):
+def test_closest_cells_offered_when_nothing_fits(analysed, monkeypatch):
     import math
 
     cd = cf.load_cells(analysed)
-    cd.cells.loc[:, "AF488_spots_n"] = np.arange(len(cd.cells)) * 50  # no cell anywhere near the median
+    monkeypatch.setattr(cf, "TIERS", ())  # no tolerance tier admits a cell: only the last resort is left
     r = cf.rank_candidates(cd, "WT", "Mock", 20, 20, n=2)
     assert len(r) == 2 and (r["relax"] == math.inf).all()
     assert "outside the usual tolerance" in cf.describe(r.iloc[0], cd)
