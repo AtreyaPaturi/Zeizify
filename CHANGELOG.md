@@ -3,6 +3,13 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.16.1] - 2026-11-05
+
+### Changed
+- Analyze page: spot settings are greyed out when they do not apply. A fluorophore's threshold row needs its
+  *Speckles* box; spot diameter, noise floor, *Split touching spots* and *Quantify spots in* need *Speckles*
+  for at least one fluorophore. An unticked channel greys out its own *Speckles* / *Overall signal* boxes.
+
 ## [1.16.0] - 2026-11-05
 
 ### Added

@@ -160,12 +160,16 @@ class AnalyzePage(ctk.CTkFrame):
         self.thr_box = ctk.CTkFrame(c, fg_color="transparent")
         self.thr_box.pack(fill="x")
         self.thr_widgets: dict[str, tuple] = {}
+        self.spot_note = ctk.CTkLabel(c, text="Spot options are off: no fluorophore has Speckles ticked.",
+                                      font=T.font(11), text_color=T.MUTED, anchor="w")
         r = _row(c, "Spot diameter (µm)", "PML bodies ~0.3-1 µm · speckles ~0.5-3 µm")
+        self.spot_rows = [r]
         self.smin, self.smax = _entry(r, d.spot_min_diameter_um, 55), _entry(r, d.spot_max_diameter_um, 55)
         self.smin.pack(side="left")
         ctk.CTkLabel(r, text="to", font=T.font(11), text_color=T.MUTED).pack(side="left", padx=6)
         self.smax.pack(side="left")
         r = _row(c, "Noise floor (MADs)", "lower = more, fainter spots")
+        self.spot_rows.append(r)
         self.sens_val = ctk.CTkLabel(r, text="", width=36, font=T.font(12, "bold"), text_color=T.TEXT)
         self.sens = ctk.CTkSlider(r, from_=2, to=12, number_of_steps=20, width=260, progress_color=T.ACCENT,
                                   button_color=T.ACCENT, button_hover_color=T.ACCENT_HOVER,
@@ -175,10 +179,12 @@ class AnalyzePage(ctk.CTkFrame):
         self.sens.pack(side="left")
         self.sens_val.pack(side="left", padx=8)
         r = _row(c, "")
+        self.spot_rows.append(r)
         self.declump = _switch(r, "Split touching spots", d.spot_declump)
         self.declump.pack(side="left")
         r = _row(c, "Quantify spots in", "tick both for nucleus, cytoplasm and whole-cell graphs; cytoplasm needs "
                                          "cell boundaries (e.g. F-actin)")
+        self.spot_rows.append(r)
         self.in_nucleus = ctk.CTkCheckBox(r, text="Nucleus", font=T.font(12), text_color=T.TEXT, checkbox_width=18,
                                           checkbox_height=18, corner_radius=5, fg_color=T.ACCENT,
                                           hover_color=T.ACCENT_HOVER, border_color=T.BORDER)
@@ -295,7 +301,8 @@ class AnalyzePage(ctk.CTkFrame):
             st = ", ".join(ds.stains_for(ch))
             cb = ctk.CTkCheckBox(self.chan_row, text=f"{ch}" + (f" · {st}" if st else ""), font=T.font(12),
                                  text_color=T.TEXT, checkbox_width=18, checkbox_height=18, corner_radius=5,
-                                 fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER, border_color=T.BORDER)
+                                 fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER, border_color=T.BORDER,
+                                 command=self._sync_spot_controls)
             cb.select()
             cb.pack(side="left", padx=(0, 14))
             self.chan_checks[ch] = cb
@@ -315,7 +322,7 @@ class AnalyzePage(ctk.CTkFrame):
             val = _entry(r, "", 90)
             val.pack(side="left", padx=8)
             ctk.CTkLabel(r, text="value (Fixed - value only)", font=T.font(11), text_color=T.MUTED).pack(side="left")
-            self.thr_widgets[ch] = (menu, val)
+            self.thr_widgets[ch] = (menu, val, r)
         values = list(CELL_MARKER_CHOICES) + [f"{ch} · {', '.join(ds.stains_for(ch))}" if ds.stains_for(ch) else ch
                                               for ch in ds.signal_channels]
         self.cell_marker.configure(values=values)
@@ -384,11 +391,11 @@ class AnalyzePage(ctk.CTkFrame):
         return union, per
 
     def _compartments(self) -> list[str]:
+        if "speckles" not in self._quantify()[0]:
+            return ["nucleus"]  # no spot detection anywhere: the (disabled) choice does not matter
         out = [name for name, cb in (("nucleus", self.in_nucleus), ("cytoplasm", self.in_cyto)) if cb.get()]
         if not out:
             raise ValueError("tick Nucleus and/or Cytoplasm under 'Quantify spots in'")
-        if "cytoplasm" in out and "speckles" not in self._quantify()[0]:
-            raise ValueError("cytoplasmic spots need Speckles ticked for at least one fluorophore")
         if "cytoplasm" in out and self._marker_choice()[0] == "off":
             raise ValueError("cytoplasmic spots need cell boundaries - set Boundary stain to Auto or a channel")
         return out
@@ -410,7 +417,7 @@ class AnalyzePage(ctk.CTkFrame):
             r = _row(self.quant_box, f"{ch}" + (f" · {stains}" if stains else ""))
             spk = ctk.CTkCheckBox(r, text="Speckles", font=T.font(12), text_color=T.TEXT, checkbox_width=18,
                                   checkbox_height=18, corner_radius=5, fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER,
-                                  border_color=T.BORDER)
+                                  border_color=T.BORDER, command=self._sync_spot_controls)
             sig = ctk.CTkCheckBox(r, text="Overall signal", font=T.font(12), text_color=T.TEXT, checkbox_width=18,
                                   checkbox_height=18, corner_radius=5, fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER,
                                   border_color=T.BORDER)
@@ -424,6 +431,43 @@ class AnalyzePage(ctk.CTkFrame):
                 ctk.CTkLabel(r, text="cell-boundary stain: overall signal only by default", font=T.font(11),
                              text_color=T.MUTED).pack(side="left", padx=12)
             self.quant_checks[ch] = (spk, sig)
+        self._sync_spot_controls()
+
+    def _speckle_channels(self) -> set[str]:
+        """Analysed channels with Speckles ticked."""
+        return {ch for ch, (spk, _sig) in self.quant_checks.items()
+                if spk.get() and (ch not in self.chan_checks or self.chan_checks[ch].get())}
+
+    @staticmethod
+    def _enable_row(row, on: bool) -> None:
+        """Enable / grey out every control in a settings row; the row label is dimmed with it."""
+        kids = row.winfo_children()
+        for i, w in enumerate(kids):
+            if isinstance(w, ctk.CTkLabel):
+                if i == 0:  # the row label (hints keep their muted colour)
+                    w.configure(text_color=T.TEXT if on else T.MUTED)
+                continue
+            try:
+                w.configure(state="normal" if on else "disabled")
+            except (ValueError, TypeError, AttributeError):
+                pass
+
+    def _sync_spot_controls(self) -> None:
+        """Spot options apply only where speckles are detected: a fluorophore's threshold row needs its own
+        Speckles box; diameter, noise floor, splitting and 'Quantify spots in' need Speckles in at least one."""
+        speckle = self._speckle_channels()
+        for ch, (spk, sig) in self.quant_checks.items():
+            analysed = ch not in self.chan_checks or bool(self.chan_checks[ch].get())
+            for cb in (spk, sig):
+                cb.configure(state="normal" if analysed else "disabled")
+        for ch, (_menu, _val, row) in self.thr_widgets.items():
+            self._enable_row(row, ch in speckle)
+        for row in self.spot_rows:
+            self._enable_row(row, bool(speckle))
+        if speckle or not self.quant_checks:
+            self.spot_note.pack_forget()
+        else:
+            self.spot_note.pack(fill="x", padx=18, pady=(4, 0), before=self.spot_rows[0])
 
     def _marker_choice(self) -> tuple[str, str]:
         v = self.cell_marker.get()
@@ -450,7 +494,10 @@ class AnalyzePage(ctk.CTkFrame):
 
     def _fixed_thresholds(self) -> dict[str, float]:
         out = {}
-        for ch, (menu, val) in self.thr_widgets.items():
+        speckle = self._speckle_channels()
+        for ch, (menu, val, _r) in self.thr_widgets.items():
+            if ch not in speckle:
+                continue  # no spot detection in this channel: its threshold is not used
             mode = menu.get()
             if mode == "Fixed - automatic":
                 out[ch] = 0.0

@@ -159,6 +159,9 @@ HELP: dict[str, dict] = {
                 "Chosen per fluorophore: each channel has its own Speckles and Overall signal boxes (e.g. F-actin: "
                 "Overall signal only; PML: both). A cell-boundary stain starts with Overall signal only. Spot "
                 "overlap between two channels needs Speckles in both; Pearson / Manders need Overall signal in both.",
+                "Spot settings follow the Speckles boxes: a fluorophore's threshold row is greyed out without its "
+                "Speckles box, and spot diameter, noise floor, splitting and 'Quantify spots in' are greyed out when "
+                "no fluorophore has Speckles ticked.",
                 "Quantify: Speckles = spot detection and everything about spots (counts, sizes, overlap). Overall "
                 "signal = the mean and total (integrated) intensity of the nucleus, cytoplasm and whole cell, "
                 "background-subtracted, speckle signal included; plus the nuclear / cytoplasmic ratio, intensity "
