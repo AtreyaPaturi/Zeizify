@@ -102,9 +102,11 @@ class FigureOptions:
 class CellData:
     out_dir: Path
     ds: object  # analysis.io.Dataset
-    cells: pd.DataFrame  # QC-passed nuclei with colocalization columns
+    cells: pd.DataFrame  # QC-passed nuclei with colocalization columns (of one staining panel)
     signal: list[str]  # analysed signal channels
     nuclear: str
+    antibody: str = ""  # the staining panel shown; "" = the folder has a single panel
+    panels: list[str] = field(default_factory=list)  # every staining panel in the folder
 
     def conditions(self) -> list[tuple[str, str]]:
         from .analysis.stats import is_control, is_wildtype, level_order
@@ -115,8 +117,19 @@ class CellData:
         return [(c, t) for c in ct for t in tr if (c, t) in have]
 
 
-def load_cells(out_dir: "str | Path") -> CellData:
-    """Measurements of an analysed Zeizify output folder (Analyze must have been run)."""
+def staining_panels(out_dir: "str | Path") -> list[str]:
+    """The staining panels (antibody combinations) of an extraction, in plate order."""
+    from .analysis.io import load_dataset
+
+    return list(dict.fromkeys(f.antibody for f in load_dataset(out_dir).fields))
+
+
+def load_cells(out_dir: "str | Path", antibody: "str | None" = None) -> CellData:
+    """Measurements of an analysed Zeizify output folder (Analyze must have been run), restricted to one
+    staining panel: cells of different panels carry different antibodies in the same channel, so they
+    are never pooled. With several panels, `antibody` is required."""
+    from dataclasses import replace
+
     from .analysis.io import load_dataset
 
     out_dir = Path(out_dir)
@@ -127,10 +140,19 @@ def load_cells(out_dir: "str | Path") -> CellData:
     ds = load_dataset(out_dir)
     if not ds.px_um:
         raise ValueError("Pixel size unknown - cannot crop in µm.")
+    panels = list(dict.fromkeys(f.antibody for f in ds.fields))
+    if antibody is None:
+        if len(panels) > 1:
+            raise ValueError(f"This folder has {len(panels)} staining panels ({', '.join(panels)}) - choose one.")
+        antibody = panels[0] if panels else ""
+    if antibody not in panels:
+        raise ValueError(f"Unknown staining panel {antibody!r}; the folder has: {', '.join(panels)}.")
+    ds = replace(ds, fields=[f for f in ds.fields if f.antibody == antibody])
     nuc = pd.read_csv(adir / "nuclei.csv")
     nuc = nuc[nuc["qc_pass"]].copy()
-    for c in ("cell_type", "treatment", "well", "field"):
+    for c in ("cell_type", "treatment", "well", "field", "antibody"):
         nuc[c] = nuc[c].fillna("").astype(str)
+    nuc = nuc[nuc["antibody"] == antibody]
     coloc_path = adir / "colocalization.csv"
     if coloc_path.exists():
         co = pd.read_csv(coloc_path)
@@ -141,8 +163,8 @@ def load_cells(out_dir: "str | Path") -> CellData:
             co = co[["well", "field", "nucleus_id", *keep]].astype({"well": str, "field": str})
             nuc = nuc.merge(co, on=["well", "field", "nucleus_id"], how="left")
     nuclear = ds.nuclear or ""
-    signal = [c for c in ds.signal_channels if f"{c}_spots_n" in nuc]
-    return CellData(out_dir, ds, nuc, signal, nuclear)
+    signal = [c for c in ds.signal_channels if f"{c}_spots_n" in nuc and nuc[f"{c}_spots_n"].notna().any()]
+    return CellData(out_dir, ds, nuc, signal, nuclear, antibody, panels)
 
 
 # ---------------------------------------------------------------- choosing cells
@@ -668,7 +690,8 @@ def export(cd: CellData, choices: dict[tuple[str, str], CellChoice], opts: Figur
     pd.DataFrame(rows).to_csv(folder / "cells.csv", index=False)
     (folder / "legend.txt").write_text(legend_text(cd, opts, rng), encoding="utf-8")
     settings = {"created": datetime.now(timezone.utc).isoformat(timespec="seconds"), "zeizify": __version__,
-                "input": str(cd.out_dir), "pixel_size_um": cd.ds.px_um, "options": opts.to_dict(),
+                "input": str(cd.out_dir), "staining_panel": cd.antibody, "pixel_size_um": cd.ds.px_um,
+                "options": opts.to_dict(),
                 "cells": [asdict(c) for c in choices.values()],
                 "display_max": {("|".join(k) if isinstance(k, tuple) else k): v for k, v in rng.items()}}
     (folder / "figure_settings.json").write_text(json.dumps(settings, indent=2), encoding="utf-8")
@@ -685,9 +708,10 @@ def legend_text(cd: CellData, opts: FigureOptions, rng: dict) -> str:
     shared = opts.contrast == "shared"
     txt = (
         "Representative single cells. "
-        + ("Each panel shows one nucleus per cell type and treatment, chosen automatically from the QC-passed, "
-           "interphase nuclei of that condition as the one closest to the condition's median spot counts, "
-           "double-positive spots, spot size and Pearson's r (Zeizify Analyze). ")
+        + (f"Staining: {cd.antibody}. " if cd.antibody else "")
+        + ("Each panel shows one nucleus per cell type and treatment, chosen automatically from the QC-passed "
+           "nuclei of that condition as the one closest to the condition's median spot counts, double-positive "
+           "spots, spot size and Pearson's r (Zeizify Analyze). ")
         + f"Channels: {', '.join(names)}. Merges are additive overlays of the pseudocolored channels. "
         + "Images are maximum-intensity projections, background-subtracted and linearly scaled; "
         + ("the display range of each channel is identical in all conditions. " if shared

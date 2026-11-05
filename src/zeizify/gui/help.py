@@ -202,6 +202,8 @@ HELP: dict[str, dict] = {
         "sections": [
             ("Quick start", [
                 "Choose the analysed output folder (filled in automatically after Analyze).",
+                "Choose the staining panel (e.g. SUMO2/3+PML). One figure shows one panel: wells stained with "
+                "different antibodies are never mixed, and the cells are matched to that panel's own results.",
                 "Tick the cell types and treatments to show, and set the crop size in µm.",
                 "Press Pick representative cells, then Preview, then Export figure.",
             ]),

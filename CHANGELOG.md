@@ -3,6 +3,18 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.11.1] - 2026-11-05
+
+### Fixed
+- Figures pooled every staining panel of a plate. With several panels (e.g. SUMO2/3 with PML, HNRNPM, SAFB
+  and SFPQ), the condition medians mixed different antibodies, and cells were picked from the wrong
+  panels, e.g. an SFPQ well under the PML label. A figure now shows one staining panel:
+  - a *Staining panel* menu on the Figures page, and `--panel` for `zeizify figure`;
+  - the panel is required when a folder has several;
+  - medians, cells, field lists and channel labels all come from that panel;
+  - the panel is recorded in `figure_settings.json` and the legend.
+- The figure legend no longer says the cells were interphase nuclei (the DAPI rule was removed in 1.11.0).
+
 ## [1.11.0] - 2026-11-02
 
 ### Changed

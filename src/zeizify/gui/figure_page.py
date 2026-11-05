@@ -303,6 +303,9 @@ class FigurePage(ctk.CTkFrame):
                                         fg_color=T.SURFACE_ALT, hover_color=T.BORDER, text_color=T.MUTED,
                                         font=T.font(12), command=self.pick_folder)
         self.folder_btn.pack(side="left", fill="x", expand=True)
+        r = _row(c, "Staining panel", "one figure per panel - cells of different panels carry different antibodies")
+        self.panel_menu = _menu(r, ["(choose a folder)"], 320, command=lambda v: self.load(self.out, v))
+        self.panel_menu.pack(side="left")
         self.info = ctk.CTkLabel(c, text="", font=T.font(12), text_color=T.MUTED, anchor="w", justify="left",
                                  wraplength=900)
         self.info.pack(fill="x", padx=18, pady=(0, 14))
@@ -444,22 +447,35 @@ class FigurePage(ctk.CTkFrame):
                 self.load(Path(out))
                 return
 
-    def load(self, out: Path) -> None:
+    def load(self, out: Path, antibody: "str | None" = None) -> None:
         from ..analysis.stats import is_control, is_wildtype, level_order
-        from ..cellfigure import _FieldCache, default_figure_panels, load_cells
+        from ..cellfigure import _FieldCache, default_figure_panels, load_cells, staining_panels
+        from ..plate import slug
         from .contrast_page import FigureLayoutCard
 
         try:
-            cd = load_cells(out)
+            panels = staining_panels(out)
+            if antibody not in panels:  # keep the current panel when reloading the same folder
+                cur = self.cd.antibody if self.cd is not None and self.out == out else None
+                antibody = cur if cur in panels else (panels[0] if panels else "")
+            cd = load_cells(out, antibody)
         except Exception as exc:  # noqa: BLE001
             self.info.configure(text=f"Could not load: {exc}", text_color=T.DANGER)
             return
         self.cd, self.out, self.candidates = cd, out, {}
         self.cache = _FieldCache(cd, size=6)
         self.folder_btn.configure(text=f"▢  {out}", text_color=T.TEXT)
+        self.panel_menu.configure(values=panels)
+        self.panel_menu.set(antibody)
+        self.name.delete(0, "end")
+        self.name.insert(0, f"single_cells_{slug(antibody)}" if len(panels) > 1 else "single_cells")
+        if getattr(self, "_picker", None) is not None and self._picker.winfo_exists():
+            self._picker.destroy()
         n = len(cd.cells)
-        self.info.configure(text=f"{n} analysed nuclei (QC-passed) · {len(cd.ds.fields)} fields · channels: "
-                                 f"{', '.join(cd.ds.channels)} · {cd.ds.px_um:.4f} µm/px", text_color=T.MUTED)
+        self.info.configure(text=f"{antibody or 'Panel'}: {n} analysed nuclei (QC-passed) · {len(cd.ds.fields)} fields · "
+                                 f"channels: {', '.join(cd.ds.channels)} · {cd.ds.px_um:.4f} µm/px"
+                                 + (f"  ·  {len(panels)} staining panels in this folder" if len(panels) > 1 else ""),
+                            text_color=T.MUTED)
         cts = level_order(cd.cells, "cell_type", first=is_wildtype)
         trs = level_order(cd.cells, "treatment", first=is_control)
         for row, checks, values in ((self.ct_row, self.ct_checks, cts), (self.tr_row, self.tr_checks, trs)):

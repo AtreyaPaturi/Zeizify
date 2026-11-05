@@ -122,3 +122,30 @@ def test_field_overview_click_and_summary(analysed):
         cd.cells.loc[(cd.cells["cell_type"] == "KO") & (cd.cells["treatment"] == "Drug"), "AF488_spots_n"]))
     assert cf.cell_summary(cd, "KO", "Drug", f.well, f.field, 999) is None
     assert f"#{nid}" in cf.describe(s, cd)
+
+
+def test_staining_panels_are_never_pooled(tmp_path):
+    from zeizify.analysis.run import run_analysis
+
+    out = tmp_path / "out"
+    design = []
+    for i, (ab, row, shared) in enumerate((("P1+S", "A", 0.9), ("P2+S", "B", 0.1))):
+        for f in ("P1", "P2"):
+            design.append({"well": f"{row}1", "field": f, "treatment": "Mock", "antibody": ab, "seed": 10 * i + int(f[1]),
+                           "shared": shared})
+    write_zeizify_output(out, design)
+    run_analysis(out, AnalysisParams(nucleus_method="classical", spot_min_diameter_um=0.5, workers=2,
+                                     qc_overlays=False), log=lambda s: None)
+    assert cf.staining_panels(out) == ["P1+S", "P2+S"]
+    with pytest.raises(ValueError, match="2 staining panels"):
+        cf.load_cells(out)
+    cd1, cd2 = cf.load_cells(out, "P1+S"), cf.load_cells(out, "P2+S")
+    assert set(cd1.cells["well"]) == {"A1"} and {f.well for f in cd1.ds.fields} == {"A1"}
+    assert set(cd2.cells["well"]) == {"B1"} and cd2.antibody == "P2+S"
+    r1 = cf.rank_candidates(cd1, "WT", "Mock", 20, 20, n=3)
+    r2 = cf.rank_candidates(cd2, "WT", "Mock", 20, 20, n=3)
+    assert set(r1["well"]) == {"A1"} and set(r2["well"]) == {"B1"}
+    # medians come from the panel's own nuclei: 90 % vs 10 % shared spots
+    assert r1["median_n_double"].iloc[0] > r2["median_n_double"].iloc[0]
+    with pytest.raises(ValueError, match="Unknown staining panel"):
+        cf.load_cells(out, "nope")

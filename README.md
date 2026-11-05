@@ -242,13 +242,14 @@ Make a publication figure with one representative cell per cell type and treatme
 output folder. In the app: **Figures** page (or *Single-cell figure* after an analysis). From the command line:
 
 ```bash
-zeizify figure out/                                    # defaults: all conditions, 30 x 30 µm, 183 mm wide
+zeizify figure out/ --panel "SUMO2/3+PML"              # one staining panel; all conditions, 30 x 30 µm, 183 mm wide
 zeizify figure out/ --treatments "MOCK,ML,MG,ML+MG" --treatment-labels "ML=ML792; MG=MG132; ML+MG=ML792 + MG132" \
     --panels "DAPI|AF488|AF594|AF488+AF594" --color AF488=green --color AF594=magenta \
     --crop 30 30 --width journal2 --font-size 8 --format png,pdf,svg --pick "KO1,MG=G2,P32,19"
 ```
 
-1. **Cells.** For each condition, Zeizify ranks the analysed nuclei by how closely they match the
+1. **Cells.** A figure shows one staining panel (`--panel`, or the *Staining panel* menu): wells stained with
+   different antibodies are never pooled. For each condition, Zeizify ranks the analysed nuclei by how closely they match the
    condition's medians: spot counts, double-positive spots, Pearson's r, spot size. It only considers
    interphase nuclei that fit in the crop, are isolated where possible, and have their signal inside the
    nucleus. The best match is picked automatically. In the app, every condition has a ranked list with

@@ -128,7 +128,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     g = sub.add_parser("figure", help="publication single-cell figure from an analysed output folder")
     g.add_argument("out", type=Path, help="Zeizify output folder, analysed with 'zeizify analyze'")
-    g.add_argument("--name", default="single_cells", help="figure name (folder OUT/figures/NAME)")
+    g.add_argument("--panel", default="", metavar="ANTIBODY",
+                   help="staining panel to show, e.g. 'SUMO2/3+PML' (required when the folder has several)")
+    g.add_argument("--name", default="", help="figure name (folder OUT/figures/NAME; default single_cells[_PANEL])")
     g.add_argument("--cell-types", default="", metavar="A,B", help="cell types to show, in order (default: all)")
     g.add_argument("--treatments", default="", metavar="A,B", help="treatments to show, in order (default: all)")
     g.add_argument("--cell-type-labels", default="", metavar="'WT=Wild type; KO1=PML KO'")
@@ -160,7 +162,13 @@ def build_parser() -> argparse.ArgumentParser:
 def _figure(args) -> int:
     from . import cellfigure as cf
 
-    cd = cf.load_cells(args.out)
+    from .plate import slug
+
+    panels = cf.staining_panels(args.out)
+    if len(panels) > 1 and not args.panel:
+        raise SystemExit(f"{args.out} has {len(panels)} staining panels - choose one with --panel: " + ", ".join(panels))
+    cd = cf.load_cells(args.out, args.panel or None)
+    name = args.name or (f"single_cells_{slug(cd.antibody)}" if len(panels) > 1 else "single_cells")
     cts = _csv(args.cell_types) or list(dict.fromkeys(c for c, _ in cd.conditions()))
     trs = _csv(args.treatments) or list(dict.fromkeys(t for _, t in cd.conditions()))
     widths = {"journal1": 89 / 25.4, "journal1.5": 120 / 25.4, "journal2": 183 / 25.4, "slide": 13.333}
@@ -194,7 +202,7 @@ def _figure(args) -> int:
             print(f"{k[0]} · {k[1]}: {cf.describe(ranked[k].iloc[0], cd)}")
         else:
             print(f"{k[0]} · {k[1]}: no suitable cell - shown as n/a (use --pick)")
-    res = cf.export(cd, choices, opts, args.name)
+    res = cf.export(cd, choices, opts, name)
     print("Wrote", ", ".join(str(p) for p in res["files"]))
     print(f"Cells, legend and settings: {res['folder']}")
     return 0
