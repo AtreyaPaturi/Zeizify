@@ -3,6 +3,17 @@
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/):
 MAJOR for incompatible output or CLI changes, MINOR for new features, PATCH for fixes.
 
+## [1.16.0] - 2026-11-05
+
+### Added
+- **Speckles / overall signal per fluorophore.**
+  - Every channel has its own *Speckles* and *Overall signal* checkboxes on the Analyze page;
+    `--channel-quantify CHANNEL=speckles|signal|both`, parameter `channel_quantify`.
+  - Spots are detected only in channels with speckles; intensity readouts and "high" cells only in
+    channels with overall signal.
+  - Spot overlap between two channels needs speckles in both; pixel colocalization needs signal in both.
+  - A cell-boundary stain (F-actin, ...) starts with overall signal only.
+
 ## [1.15.0] - 2026-11-05
 
 ### Added

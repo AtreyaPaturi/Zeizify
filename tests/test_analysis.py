@@ -431,3 +431,32 @@ def test_signal_only_run(tmp_path):
     assert not any(n.endswith("_spots_per_nucleus.png") for n in names)
     metrics = set(pd.read_csv(res.analysis_dir / "replicate_summary.csv")["metric"])
     assert {"mean_bgsub", "integrated_bgsub"} <= metrics and "spots_n" not in metrics
+
+
+def test_quantify_per_fluorophore(tmp_path):
+    import tifffile
+
+    from zeizify.analysis.io import load_dataset
+    from zeizify.analysis.measure import measure_field
+    from zeizify.analysis.stats import long_table
+
+    out = tmp_path / "o"
+    write_zeizify_output(out, [{"well": "A1", "field": "P1", "treatment": "Mock", "seed": 4, "shared": 0.5}])
+    fi = load_dataset(out).fields[0]
+    nuc = segment_nuclei(tifffile.imread(fi.channels["DAPI"]), P, PX, "classical")
+    mixed = AnalysisParams(**{**P.to_dict(), "channel_quantify": {"AF488": ["signal"], "AF594": ["speckles", "signal"]}})
+    assert mixed.quantify_for("AF488") == {"signal"} and mixed.quantify_for("AF647") == {"speckles", "signal"}
+    r = measure_field(fi, nuc, "DAPI", ["AF488", "AF594"], mixed, PX)
+    n, sp, co = pd.DataFrame(r.nuclei), pd.DataFrame(r.spots), pd.DataFrame(r.coloc)
+    assert set(sp["channel"]) == {"AF594"}  # no spot detection in AF488
+    assert n["AF488_spots_n"].isna().all() and (n["AF594_spots_n"] > 0).all()
+    assert n["AF488_integrated_bgsub"].notna().all() and n["AF594_spots_integrated_bgsub"].notna().all()
+    assert co["n_double"].isna().all() and co["pearson"].notna().all()  # overlap needs spots in both channels
+    metrics = long_table(n, co, ["AF488", "AF594"], mixed.quantify_for)
+    by = {f: set(g["metric"]) for f, g in metrics.groupby("feature")}
+    assert "spots_n" not in by["AF488"] and "mean_bgsub" in by["AF488"]
+    assert {"spots_n", "mean_bgsub"} <= by["AF594"] and "pearson" in by["AF488×AF594"]
+    # speckles only in AF594: its signal readouts and the pixel colocalization leave the statistics
+    spk = AnalysisParams(**{**P.to_dict(), "channel_quantify": {"AF488": ["signal"], "AF594": ["speckles"]}})
+    by2 = {f: set(g["metric"]) for f, g in long_table(n, co, ["AF488", "AF594"], spk.quantify_for).groupby("feature")}
+    assert "mean_bgsub" not in by2["AF594"] and "spots_n" in by2["AF594"] and "AF488×AF594" not in by2

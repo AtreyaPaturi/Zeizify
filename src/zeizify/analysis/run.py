@@ -302,11 +302,13 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
     ready = [f for f in todo if _mask_path(masks, f).exists()]
 
     # experiment-wide spot floors: pool the per-nucleus spot candidates of every field first
-    do_spots = "speckles" in (params.quantify or ["speckles", "signal"])
-    do_signal = "signal" in (params.quantify or ["speckles", "signal"])
-    log("Quantifying: " + " and ".join(x for x, on in (("speckles", do_spots), ("overall signal", do_signal)) if on) + ".")
-    auto = [c for c, v in params.spot_fixed_threshold.items()
-            if c in spot_channels and not (v and v > 0)] if do_spots else []
+    speckle_ch = [c for c in spot_channels if "speckles" in params.quantify_for(c)]
+    signal_ch = [c for c in spot_channels if "signal" in params.quantify_for(c)]
+    do_spots, do_signal = bool(speckle_ch), bool(signal_ch)
+    log("Quantifying: " + "; ".join(
+        f"{c} " + " + ".join(x for x, on in (("speckles", c in speckle_ch), ("overall signal", c in signal_ch)) if on)
+        for c in spot_channels) + ".")
+    auto = [c for c, v in params.spot_fixed_threshold.items() if c in speckle_ch and not (v and v > 0)]
     candidates: dict[str, list] = {c: [] for c in auto}
     tagged: list[pd.DataFrame] = []  # the same, with treatment / cell type, for the check plot
     if auto:
@@ -329,7 +331,7 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
         if stop.is_set():
             raise InterruptedError("Stopped - nuclear masks are cached; run again to finish.")
     candidates = {c: (np.concatenate(v) if v else np.zeros(0)) for c, v in candidates.items()}
-    spot_floors = resolve_spot_floors(params, spot_channels, candidates) if do_spots else {}
+    spot_floors = resolve_spot_floors(params, speckle_ch, candidates) if do_spots else {}
     for c, d in spot_floors.items():
         sep = f", separability {d['separability']:.2f}" if np.isfinite(d["separability"]) else ""
         log(f"  {c}: spot brightness floor {d['floor']:.0f} ({d['mode']}{sep})")
@@ -379,7 +381,7 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
     if len(nuclei) and do_signal:
         o0 = default_orders(nuclei, params.treatment_order, params.cell_type_order)
         reference = resolve_reference(o0, params.reference_cell_type, params.reference_treatment)
-        nuclei, high_info = add_high_flags(nuclei, spot_channels, reference, params.high_percentile)
+        nuclei, high_info = add_high_flags(nuclei, signal_ch, reference, params.high_percentile)
         high_info.to_csv(adir / "high_thresholds.csv", index=False)
         log(f"Reference condition: {reference[0]} · {reference[1]} - 'high' cells are above its "
             f"{params.high_percentile:g}th percentile (high_thresholds.csv).")
@@ -394,7 +396,7 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
         from .stats import write_spot_brightness_plot
 
         write_spot_brightness_plot(spots, pd.concat(tagged, ignore_index=True) if tagged else None, spot_floors,
-                                   spot_channels, ds.px_um, qc_dir / "spot_brightness.png")
+                                   speckle_ch, ds.px_um, qc_dir / "spot_brightness.png")
         log("Wrote qc/spot_brightness.png (spot brightness per treatment, with any fixed floor).")
     except Exception as exc:  # noqa: BLE001 - a diagnostic plot never fails the run
         log(f"  spot brightness plot skipped: {exc}")
@@ -404,7 +406,7 @@ def run_analysis(out_dir: "str | Path", params: "AnalysisParams | None" = None, 
         for c in ("cell_type", "treatment", "antibody", "replicate"):
             if c in df:
                 df[c] = df[c].fillna("")
-    long = long_table(nuclei, coloc, spot_channels, params.quantify) if len(nuclei) else pd.DataFrame()
+    long = long_table(nuclei, coloc, spot_channels, params.quantify_for) if len(nuclei) else pd.DataFrame()
     rep = replicate_summary(long) if len(long) else pd.DataFrame()
     cond = condition_summary(rep) if len(rep) else pd.DataFrame()
     orders = default_orders(long, params.treatment_order, params.cell_type_order) if len(long) else {}

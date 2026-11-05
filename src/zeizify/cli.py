@@ -115,6 +115,8 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--no-declump", action="store_true")
     a.add_argument("--quantify", default="speckles,signal", metavar="speckles,signal",
                    help="speckles (spot detection), signal (overall intensity, speckles included), or both (default)")
+    a.add_argument("--channel-quantify", action="append", default=[], metavar="CHANNEL=speckles|signal|both",
+                   help="what to quantify in one channel (repeatable), e.g. AF488=signal AF594=both; others use --quantify")
     a.add_argument("--spots-in", default="nucleus", metavar="nucleus,cytoplasm",
                    help="where to detect and count spots: nucleus, cytoplasm, or both (cytoplasm needs cell boundaries)")
     a.add_argument("--fixed-threshold", action="append", default=[], metavar="CHANNEL[=VALUE]",
@@ -247,6 +249,17 @@ def _quantify(args) -> list[str]:
     return out
 
 
+def _channel_quantify(args) -> dict[str, list[str]]:
+    out = {}
+    for it in args.channel_quantify:
+        ch, _, what = it.partition("=")
+        q = _csv(what.lower().replace("both", "speckles,signal").replace("+", ","))
+        if not ch.strip() or not q or any(x not in ("speckles", "signal") for x in q):
+            raise SystemExit(f"--channel-quantify expects CHANNEL=speckles|signal|both, got {it!r}")
+        out[ch.strip()] = q
+    return out
+
+
 def _compartments(args) -> list[str]:
     out = _csv(args.spots_in.lower().replace("both", "nucleus,cytoplasm"))
     bad = [x for x in out if x not in ("nucleus", "cytoplasm")]
@@ -265,7 +278,7 @@ def _analyze(args) -> int:
         exclude_border_nuclei=not args.keep_border_nuclei, use_gpu=not args.cpu,
         spot_min_diameter_um=args.spot_diameter[0], spot_max_diameter_um=args.spot_diameter[1],
         spot_sensitivity=args.sensitivity, spot_declump=not args.no_declump, spot_compartments=_compartments(args),
-        quantify=_quantify(args),
+        quantify=_quantify(args), channel_quantify=_channel_quantify(args),
         reference_cell_type=args.reference.partition(",")[0].strip(),
         reference_treatment=args.reference.partition(",")[2].strip(), high_percentile=args.high_percentile,
         coloc_randomizations=args.randomizations, cell_segmentation=args.cells, cell_marker=args.cell_marker,

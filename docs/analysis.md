@@ -164,7 +164,10 @@ point-spread function rather than the body's physical size.
 
 ## 3b. What is quantified: speckles, overall signal, or both
 
-`quantify` (*Quantify* checkboxes on the Analyze page; `--quantify`):
+Chosen per fluorophore (`channel_quantify`; a *Speckles* and an *Overall signal* checkbox per channel on
+the Analyze page; `--channel-quantify AF488=signal`), with `quantify` as the default for unlisted channels.
+A cell-boundary stain such as F-actin starts with overall signal only. Spot overlap between two channels
+needs speckles in both; pixel colocalization needs the overall signal in both.
 - **Speckles**: spot detection and everything derived from spots (counts, sizes, shapes, enrichment,
   single / double-positive spots, object overlap). Without it no spots are detected, and the run is
   faster.

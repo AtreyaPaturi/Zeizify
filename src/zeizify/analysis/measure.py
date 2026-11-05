@@ -27,12 +27,15 @@ Per cell (fields with a cell-boundary marker, e.g. F-actin; cell id = nucleus id
   Background is then taken outside the cells (> 1 µm away), so cytoplasmic signal is not counted as
   background.
 
-Overall signal (params.quantify contains "signal"), background-subtracted, speckles included:
+What is quantified is set per channel (params.quantify_for(channel): "speckles" and / or "signal").
+
+Overall signal ("signal"), background-subtracted, speckles included:
   <channel>_integrated_bgsub, _cyto_integrated_bgsub, _cell_integrated_bgsub   total signal
   (means: mean_bgsub, cyto_mean_bgsub, cell_mean_bgsub). With speckles quantified too, the nuclear total
   is split into <channel>_spots_integrated_bgsub (in speckles) and <channel>_diffuse_mean_bgsub (mean
   outside speckles); likewise <channel>_cyto_spots_integrated_bgsub in the cytoplasm.
-  With "speckles" not selected no spots are detected and every spot column is empty (NaN).
+  In a channel without "speckles" no spots are detected and its spot columns are empty (NaN); spot overlap
+  between two channels needs speckles in both.
 
 Spots per compartment (params.spot_compartments; cytoplasm needs cell boundaries):
   <channel>_cyto_spots_n, _cyto_spots_area_um2, _cyto_spots_area_frac, _cyto_spot_mean_area_halfmax_um2,
@@ -112,8 +115,8 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
             away = away_cells
     bg = {c: (float(np.percentile(a[away], 10)) if away.any() else float(np.percentile(a, 1))) for c, a in imgs.items()}
 
-    do_spots = "speckles" in (params.quantify or ["speckles", "signal"])
-    comps = set(params.spot_compartments or ["nucleus"]) if do_spots else set()
+    spot_ch = {c for c in spot_channels if "speckles" in params.quantify_for(c)}  # channels with spot detection
+    comps = set(params.spot_compartments or ["nucleus"]) if spot_ch else set()
     do_nuc = "nucleus" in comps
     # cytoplasm label image: cell id (= nucleus id) outside every nucleus
     cyto_lab = (np.where(nuclei == 0, cells, 0).astype(np.int32)
@@ -121,11 +124,11 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
     spots, tophats, cspots = {}, {}, {}
     for c in spot_channels:
         floor = (spot_floors or {}).get(c, 0.0)
-        if do_nuc:
+        if do_nuc and c in spot_ch:
             spots[c], tophats[c] = detect_spots(imgs[c], nuclei, params, px_um, floor)
         else:
             spots[c], tophats[c] = np.zeros(nuclei.shape, np.int32), np.zeros(nuclei.shape, np.float32)
-        if cyto_lab is not None:
+        if cyto_lab is not None and c in spot_ch:
             cspots[c] = detect_spots(imgs[c], cyto_lab, params, px_um, floor)
 
     # spot tables + per-nucleus / per-cell spot summaries
@@ -195,13 +198,13 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
             tot = float(np.clip(vb, 0, None).sum())
             n[f"{c}_frac_in_spots"] = float(np.clip(vb[in_spot], 0, None).sum() / tot) if tot > 0 else float("nan")
             n[f"{c}_integrated_bgsub"] = float(vb.sum())  # total nuclear signal, speckles included
-            if do_nuc:
+            if do_nuc and c in spot_ch:
                 n[f"{c}_spots_integrated_bgsub"] = float(vb[in_spot].sum())  # the part in speckles
                 n[f"{c}_diffuse_mean_bgsub"] = float(vb[~in_spot].mean()) if (~in_spot).any() else float("nan")
             else:  # nuclear spots not quantified
                 for k in NUCLEAR_SPOT_KEYS:
                     n[f"{c}_{k}"] = float("nan")
-            if cyto_lab is not None:
+            if cyto_lab is not None and c in spot_ch:
                 _cyto_spots(n, c, nid, cyto_summary.get((c, nid), []), cyto_px, px2, do_nuc, bg[c])
         if cells is not None:
             _measure_cell(n, nid, cells, nuclei, imgs, nuclear, bg, px2, cell_slices, cell_marker)
@@ -219,7 +222,8 @@ def measure_field(fi: FieldImages, nuclei: np.ndarray, nuclear: str, spot_channe
                                              params.coloc_randomizations, rng)
                                if params.coloc_randomizations > 0 else float("nan"))
             oc = object_coloc(np.where(mask, spots[a][sl], 0), np.where(mask, spots[b][sl], 0), mask, px_um)
-            row.update(oc if do_nuc else {k: float("nan") for k in oc})  # object overlap needs nuclear spots
+            ok = do_nuc and a in spot_ch and b in spot_ch  # object overlap needs nuclear spots in both channels
+            row.update(oc if ok else {k: float("nan") for k in oc})
             res.coloc.append(row)
 
     res.field_row = {**ids, "nuclei_total": len(regions), "nuclei_qc_pass": sum(x["qc_pass"] for x in res.nuclei),

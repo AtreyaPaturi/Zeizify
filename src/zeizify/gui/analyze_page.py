@@ -145,18 +145,17 @@ class AnalyzePage(ctk.CTkFrame):
         section_title(c, "Speckles / nuclear bodies",
                       "Detected inside each nucleus: white top-hat background removal, per-nucleus threshold with a "
                       "noise floor, size window").pack(fill="x", padx=18, pady=(14, 6))
-        r = _row(c, "Quantify", "Speckles: spot detection and counts · Overall signal: mean and total intensity of "
-                                "nucleus / cytoplasm / cell, speckle signal included")
-        self.q_speckles = ctk.CTkCheckBox(r, text="Speckles", font=T.font(12), text_color=T.TEXT, checkbox_width=18,
-                                          checkbox_height=18, corner_radius=5, fg_color=T.ACCENT,
-                                          hover_color=T.ACCENT_HOVER, border_color=T.BORDER)
-        self.q_signal = ctk.CTkCheckBox(r, text="Overall signal", font=T.font(12), text_color=T.TEXT, checkbox_width=18,
-                                        checkbox_height=18, corner_radius=5, fg_color=T.ACCENT,
-                                        hover_color=T.ACCENT_HOVER, border_color=T.BORDER)
-        for cb in (self.q_speckles, self.q_signal):
-            cb.select()
-            cb.pack(side="left", padx=(0, 14))
         self.chan_row = _row(c, "Channels")
+        ctk.CTkLabel(c, text="QUANTIFY PER FLUOROPHORE - Speckles: spot detection, counts, sizes, overlap · Overall "
+                             "signal: mean and total intensity of nucleus / cytoplasm / cell, speckle signal included",
+                     font=T.font(10, "bold"), text_color=T.ACCENT, anchor="w", justify="left", wraplength=900).pack(
+            fill="x", padx=18, pady=(8, 0))
+        self.quant_box = ctk.CTkFrame(c, fg_color="transparent")
+        self.quant_box.pack(fill="x")
+        self.quant_checks: dict[str, tuple] = {}
+        self.quant_hint = ctk.CTkLabel(self.quant_box, text="Choose an output folder to list its fluorophores.",
+                                       font=T.font(11), text_color=T.MUTED, anchor="w")
+        self.quant_hint.pack(fill="x", padx=18)
         self.chan_checks: dict[str, ctk.CTkCheckBox] = {}
         self.thr_box = ctk.CTkFrame(c, fg_color="transparent")
         self.thr_box.pack(fill="x")
@@ -334,6 +333,7 @@ class AnalyzePage(ctk.CTkFrame):
             menu.configure(values=[auto, *values])
             if menu.get() not in values:
                 menu.set(auto)
+        self._build_quant_rows(ds)
         self.field_menu.configure(values=[f.key for f in ds.fields])
         self.field_menu.set(ds.fields[0].key if ds.fields else "")
 
@@ -354,7 +354,8 @@ class AnalyzePage(ctk.CTkFrame):
                 spot_channels=[c for c, cb in self.chan_checks.items() if cb.get()],
                 spot_min_diameter_um=float(self.smin.get()), spot_max_diameter_um=float(self.smax.get()),
                 spot_sensitivity=round(float(self.sens.get()), 1), spot_declump=bool(self.declump.get()),
-                spot_compartments=self._compartments(), quantify=self._quantify(),
+                spot_compartments=self._compartments(), quantify=self._quantify()[0],
+                channel_quantify=self._quantify()[1],
                 coloc_randomizations=int(self.rand.get()), replicate_column=REPLICATE_CHOICES[self.rep.get()],
                 workers=max(1, int(self.workers.get())), qc_overlays=bool(self.qc.get()),
                 cell_segmentation=self._marker_choice()[0], cell_marker=self._marker_choice()[1],
@@ -369,19 +370,60 @@ class AnalyzePage(ctk.CTkFrame):
             self.app.toast(f"Check the settings: {exc}", kind="warning")
             return None
 
-    def _quantify(self) -> list[str]:
-        out = [name for name, cb in (("speckles", self.q_speckles), ("signal", self.q_signal)) if cb.get()]
-        if not out:
-            raise ValueError("tick Speckles and/or Overall signal under 'Quantify'")
-        return out
+    def _quantify(self) -> tuple[list[str], dict[str, list[str]]]:
+        """(everything quantified in any channel, per-channel choice) for the analysed channels."""
+        per = {}
+        for ch, (spk, sig) in self.quant_checks.items():
+            if ch in self.chan_checks and not self.chan_checks[ch].get():
+                continue  # channel not analysed
+            q = [name for name, cb in (("speckles", spk), ("signal", sig)) if cb.get()]
+            if not q:
+                raise ValueError(f"{ch}: tick Speckles and/or Overall signal (or untick the channel)")
+            per[ch] = q
+        union = sorted({x for q in per.values() for x in q}, key=["speckles", "signal"].index) or ["speckles", "signal"]
+        return union, per
 
     def _compartments(self) -> list[str]:
         out = [name for name, cb in (("nucleus", self.in_nucleus), ("cytoplasm", self.in_cyto)) if cb.get()]
         if not out:
             raise ValueError("tick Nucleus and/or Cytoplasm under 'Quantify spots in'")
+        if "cytoplasm" in out and "speckles" not in self._quantify()[0]:
+            raise ValueError("cytoplasmic spots need Speckles ticked for at least one fluorophore")
         if "cytoplasm" in out and self._marker_choice()[0] == "off":
             raise ValueError("cytoplasmic spots need cell boundaries - set Boundary stain to Auto or a channel")
         return out
+
+    def _build_quant_rows(self, ds) -> None:
+        """One row per fluorophore: Speckles / Overall signal. A cell-boundary stain (F-actin, ...) starts with
+        Overall signal only - it has no speckles to count."""
+        from ..analysis.cells import CELL_MARKER_KEYWORDS
+
+        # keep the choices when the same folder is reloaded; a different folder starts from the defaults
+        same = getattr(self, "_quant_dir", None) == ds.out_dir
+        old = {ch: (spk.get(), sig.get()) for ch, (spk, sig) in self.quant_checks.items()} if same else {}
+        self._quant_dir = ds.out_dir
+        for w in self.quant_box.winfo_children():
+            w.destroy()
+        self.quant_checks = {}
+        for ch in ds.signal_channels:
+            stains = ", ".join(ds.stains_for(ch))
+            r = _row(self.quant_box, f"{ch}" + (f" · {stains}" if stains else ""))
+            spk = ctk.CTkCheckBox(r, text="Speckles", font=T.font(12), text_color=T.TEXT, checkbox_width=18,
+                                  checkbox_height=18, corner_radius=5, fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER,
+                                  border_color=T.BORDER)
+            sig = ctk.CTkCheckBox(r, text="Overall signal", font=T.font(12), text_color=T.TEXT, checkbox_width=18,
+                                  checkbox_height=18, corner_radius=5, fg_color=T.ACCENT, hover_color=T.ACCENT_HOVER,
+                                  border_color=T.BORDER)
+            marker = any(k in stains.lower() for k in CELL_MARKER_KEYWORDS)
+            on_spk, on_sig = old.get(ch, (not marker, True))
+            spk.select() if on_spk else spk.deselect()
+            sig.select() if on_sig else sig.deselect()
+            spk.pack(side="left", padx=(0, 14))
+            sig.pack(side="left")
+            if marker and ch not in old:
+                ctk.CTkLabel(r, text="cell-boundary stain: overall signal only by default", font=T.font(11),
+                             text_color=T.MUTED).pack(side="left", padx=12)
+            self.quant_checks[ch] = (spk, sig)
 
     def _marker_choice(self) -> tuple[str, str]:
         v = self.cell_marker.get()

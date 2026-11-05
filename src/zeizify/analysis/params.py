@@ -42,6 +42,8 @@ class AnalysisParams:
     # what is quantified: "speckles" (spot detection, counts, sizes, spot overlap) and / or "signal" (overall
     # intensity of each compartment - mean and total, which includes the speckle signal)
     quantify: list[str] = field(default_factory=lambda: ["speckles", "signal"])
+    # per fluorophore: channel -> ["speckles"] / ["signal"] / both; channels not listed use `quantify`
+    channel_quantify: dict[str, list[str]] = field(default_factory=dict)
     # where spots are detected and counted: "nucleus" and/or "cytoplasm" (cytoplasm needs cell boundaries,
     # i.e. a cell-boundary stain such as F-actin in the field)
     spot_compartments: list[str] = field(default_factory=lambda: ["nucleus"])
@@ -75,6 +77,10 @@ class AnalysisParams:
     def from_dict(cls, d: dict) -> "AnalysisParams":
         known = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
         return cls(**known)
+
+    def quantify_for(self, channel: str) -> set[str]:
+        """What is quantified in one channel: a subset of {"speckles", "signal"}."""
+        return set(self.channel_quantify.get(channel, self.quantify) or [])
 
     def nucleus_area_um2(self) -> float:
         import math

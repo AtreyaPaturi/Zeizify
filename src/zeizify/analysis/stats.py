@@ -163,10 +163,25 @@ def default_orders(long: pd.DataFrame, treatments=(), cell_types=()) -> dict:
             "cell_type": level_order(long, "cell_type", cell_types, is_wildtype)}
 
 
-def long_table(nuclei: pd.DataFrame, coloc: pd.DataFrame, channels: list[str],
-               quantify: "list[str] | None" = None) -> pd.DataFrame:
+def _quantified(quantify, channel: str) -> set[str]:
+    """What is quantified in a channel; `quantify` is None (everything), a list for all channels, a
+    channel -> list dict, or a callable (e.g. AnalysisParams.quantify_for)."""
+    if quantify is None:
+        return {"speckles", "signal"}
+    if callable(quantify):
+        return set(quantify(channel))
+    if isinstance(quantify, dict):
+        return set(quantify.get(channel, ["speckles", "signal"]))
+    return set(quantify)
+
+
+PIXEL_COLOC = {"pearson", "spearman", "icq", "tm1", "tm2"}
+
+
+def long_table(nuclei: pd.DataFrame, coloc: pd.DataFrame, channels: list[str], quantify=None) -> pd.DataFrame:
     """One row per nucleus x metric: antibody, cell_type, treatment, replicate, well, measure,
-    metric, feature (channel or pair), stain, value. QC-failed nuclei are dropped."""
+    metric, feature (channel or pair), stain, value. QC-failed nuclei are dropped. Signal readouts of a
+    channel without "signal" quantified are left out (pixel colocalization needs it in both channels)."""
     ids = ["antibody", "cell_type", "treatment", "replicate", "well"]
     parts = []
     n = nuclei[nuclei["qc_pass"]] if len(nuclei) else nuclei
@@ -174,19 +189,23 @@ def long_table(nuclei: pd.DataFrame, coloc: pd.DataFrame, channels: list[str],
         if m in n:
             parts.append(n[ids].assign(metric=m, metric_label=label, feature="nucleus", stain="", value=n[m]))
     for c in channels:
+        signal = "signal" in _quantified(quantify, c)
         for m, label in CHANNEL_METRICS.items():
             col = f"{c}_{m}"
-            if col in n:
+            if col in n and (signal or m not in SIGNAL_METRICS):
                 stain = n.get(f"{c}_stain", pd.Series("", index=n.index)).fillna("")
                 parts.append(n[ids].assign(metric=m, metric_label=label, feature=c, stain=stain.values, value=n[col]))
     if len(coloc):
         cl = coloc[coloc["qc_pass"]]
+        sig_ok = (cl["channel_a"].map(lambda c: "signal" in _quantified(quantify, c))
+                  & cl["channel_b"].map(lambda c: "signal" in _quantified(quantify, c)))
         for m, label in COLOC_METRICS.items():
-            if m in cl:
-                feat = cl["channel_a"] + "×" + cl["channel_b"]
-                stain = cl["stain_a"].fillna("").astype(str) + "×" + cl["stain_b"].fillna("").astype(str)
-                parts.append(cl[ids].assign(metric=m, metric_label=label, feature=feat.values, stain=stain.values,
-                                            value=cl[m]))
+            if m in cl and (m not in PIXEL_COLOC or sig_ok.any()):
+                cl_m = cl[sig_ok] if m in PIXEL_COLOC else cl
+                feat = cl_m["channel_a"] + "×" + cl_m["channel_b"]
+                stain = cl_m["stain_a"].fillna("").astype(str) + "×" + cl_m["stain_b"].fillna("").astype(str)
+                parts.append(cl_m[ids].assign(metric=m, metric_label=label, feature=feat.values, stain=stain.values,
+                                              value=cl_m[m]))
     if not parts:
         return pd.DataFrame(columns=ids + ["metric", "metric_label", "feature", "stain", "value"])
     out = pd.concat(parts, ignore_index=True)
@@ -194,8 +213,6 @@ def long_table(nuclei: pd.DataFrame, coloc: pd.DataFrame, channels: list[str],
     # empty values (cell metrics where no cell was segmented, nuclear spots when not quantified, ...) carry no
     # information: drop them, and a zero cytoplasm area (no cell)
     out = out[out["value"].notna() & ~((out["metric"] == "cyto_area_um2") & (out["value"] == 0))]
-    if quantify is not None and "signal" not in quantify:
-        out = out[~out["metric"].isin(SIGNAL_METRICS | {"pearson", "spearman", "icq", "tm1", "tm2"})]
     return out
 
 
